@@ -1,10 +1,18 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-mantine-color-scheme="light">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Mantine Vite Template</title>
+    <title>Mama Kitchen | مطبخ ماما</title>
+    <script>
+      try {
+        var s = localStorage.getItem('mantine-color-scheme-value') || localStorage.getItem('mama-kitchen-color-scheme') || 'light';
+        if (s === 'dark' || s === 'light' || s === 'auto') {
+          document.documentElement.setAttribute('data-mantine-color-scheme', s);
+        }
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="root"></div>

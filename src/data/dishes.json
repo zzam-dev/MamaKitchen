@@ -1,0 +1,273 @@
+[
+  {
+    "id": 1,
+    "title": "Agashi Sandwich",
+    "title_ar": "سندوتش الأقاشي",
+    "description": "Crispy Agashi chicken fillet in a sub roll, served with lemon, sauce, powder, and onion.",
+    "description_ar": "سندوتش أقاشي الدجاج المقرمش في خبز فينو، يُقدم مع ليمون وشطة وبودرة وبصل.",
+    "image": "agashi",
+    "category": "main",
+    "sale": true,
+    "sizes": [
+      { "label": "S", "price": 75, "discountedPrice": 55 }
+    ]
+  },
+  {
+    "id": 2,
+    "title": "Macaroni Béchamel",
+    "title_ar": "مكرونة بالبشاميل",
+    "description": "Oven-baked pasta layered with rich béchamel sauce, a comforting Sudanese home classic.",
+    "description_ar": "مكرونة فرن غنية بطبقات البشاميل الكريمي واللحم المفروم على الطريقة السودانية.",
+    "image": "maincourse",
+    "category": "main",
+    "sale": false,
+    "available": false,
+    "sizes": [
+      { "label": "S", "price": 180 },
+      { "label": "L", "price": 400 }
+    ]
+  },
+  {
+    "id": 3,
+    "title": "Potato Tray with Chicken",
+    "title_ar": "صينية بطاطس بالفراخ",
+    "description": "Oven-roasted potato tray with spiced chicken pieces, slow-baked to golden perfection.",
+    "description_ar": "صينية بطاطس في الفرن مع قطع الفراخ المتبلة ومخبوزة لدرجة الاستواء الذهبي.",
+    "image": "maincourse",
+    "category": "main",
+    "sale": false,
+    "sizes": [
+      { "label": "S", "price": 280 },
+      { "label": "M", "price": 350 },
+      { "label": "L", "price": 550 }
+    ]
+  },
+  {
+    "id": 4,
+    "title": "Agashi",
+    "title_ar": "أقاشي دجاج",
+    "description": "A Sudanese delicacy — spiced marinated chicken with aromatic herbs, roasted to perfection.",
+    "description_ar": "أقاشي سوداني أصيل متبل بالبهارات والخلطة الخاصة ومشوي بعناية.",
+    "image": "agashi",
+    "category": "main",
+    "sale": false,
+    "sizes": [
+      { "label": "S", "price": 180 },
+      { "label": "M", "price": 240 },
+      { "label": "L", "price": 320 }
+    ]
+  },
+  {
+    "id": 5,
+    "title": "Mahshi (10/6/4)",
+    "title_ar": "محشي (10/6/4)",
+    "description": "Stuffed vegetables filled with spiced rice and herbs, slow-cooked in a tomato broth. Available in portions (4/6/10 pcs) or per piece.",
+    "description_ar": "تشكيلة خضار محشية بالأرز والخلطة السرية مطبوخة في مرق الطماطم. متاح أطباق (4 / 6 / 10 قطع) أو بالقطعة.",
+    "image": "maincourse",
+    "category": "main",
+    "sale": false,
+    "sizes": [
+      { "label": "S", "price": 140 },
+      { "label": "M", "price": 170 },
+      { "label": "L", "price": 200 }
+    ],
+    "perPiece": {
+      "price": 35
+    }
+  },
+  {
+    "id": 6,
+    "title": "Kofta (10/6/4)",
+    "title_ar": "كفتة (10/6/4)",
+    "description": "Handmade spiced meat patties grilled over flame, served with fresh sides. Available in portions (4/6/10 pcs) or per piece.",
+    "description_ar": "كفتة لحم متبلة مشوية على اللهب بأيدي أمهاتنا. متاح أطباق (4 / 6 / 10 قطع) أو بالقطعة.",
+    "image": "maincourse",
+    "category": "main",
+    "sale": false,
+    "sizes": [
+      { "label": "S", "price": 145 },
+      { "label": "M", "price": 175 },
+      { "label": "L", "price": 210 }
+    ],
+    "perPiece": {
+      "price": 38
+    }
+  },
+  {
+    "id": 7,
+    "title": "Khodhira Stew",
+    "title_ar": "طبيخ خضرة",
+    "description": "Classic Sudanese green vegetable stew slow-simmered with spices and ghee.",
+    "description_ar": "طبيخ خضرة سوداني مسبك بالسمن والتوابل الشرقية الأصيلة.",
+    "image": "maincourse",
+    "category": "stew",
+    "sale": false,
+    "sizes": [
+      { "label": "S", "price": 120 },
+      { "label": "M", "price": 220 },
+      { "label": "L", "price": 350 }
+    ]
+  },
+  {
+    "id": 8,
+    "title": "Okra Stew (Tabeekh / Mafrouka)",
+    "title_ar": "بامية طبيخ / مفروكة",
+    "description": "Tender okra in a rich meat broth, available either whole or traditional mafrouka.",
+    "description_ar": "بامية طازجة في مرق اللحم الغني، متوفرة طبيخ أو مفروكة سودانية حسب الطلب.",
+    "image": "maincourse",
+    "category": "stew",
+    "sale": false,
+    "sizes": [
+      { "label": "S", "price": 120 },
+      { "label": "M", "price": 220 },
+      { "label": "L", "price": 350 }
+    ]
+  },
+  {
+    "id": 9,
+    "title": "Squash Stew",
+    "title_ar": "طبيخ قرع",
+    "description": "Sweet golden squash cooked down into a warming stew with aromatic spices.",
+    "description_ar": "طبيخ قرع عسلي مسبك بنكهة حلوة ومتبلة ومطبوخة بعناية.",
+    "image": "maincourse",
+    "category": "stew",
+    "sale": false,
+    "sizes": [
+      { "label": "S", "price": 120 },
+      { "label": "M", "price": 220 },
+      { "label": "L", "price": 350 }
+    ]
+  },
+  {
+    "id": 10,
+    "title": "Bean Stew",
+    "title_ar": "طبيخ فاصوليا",
+    "description": "Hearty slow-cooked white beans in a rich tomato sauce, a staple of Sudanese family tables.",
+    "description_ar": "طبيخ فاصوليا بيضاء مطبوخة في صلصة الطماطم المتبلة الغنية.",
+    "image": "maincourse",
+    "category": "stew",
+    "sale": false,
+    "available": false,
+    "sizes": [
+      { "label": "S", "price": 120 },
+      { "label": "M", "price": 220 },
+      { "label": "L", "price": 350 }
+    ]
+  },
+  {
+    "id": 11,
+    "title": "Um Raqiqa Stew",
+    "title_ar": "أم رقيقة",
+    "description": "A delicate traditional Sudanese stew prepared with minced meat, onions, and dry okra broth.",
+    "description_ar": "ملاح أم رقيقة السوداني التقليدي باللحم المفروم والويكة والبهارات المميزة.",
+    "image": "maincourse",
+    "category": "stew",
+    "sale": false,
+    "sizes": [
+      { "label": "S", "price": 130 },
+      { "label": "M", "price": 240 },
+      { "label": "L", "price": 380 }
+    ]
+  },
+  {
+    "id": 12,
+    "title": "Naimiya Stew",
+    "title_ar": "ملاح نعيمية",
+    "description": "Classic Sudanese festive red stew with yogurt, onions, and minced meat sauce.",
+    "description_ar": "ملاح نعيمية بلدي بالزبادي وصلصة اللحم المسبكة، رفيق الكسرة والقراصة الأول.",
+    "image": "maincourse",
+    "category": "stew",
+    "sale": false,
+    "sizes": [
+      { "label": "S", "price": 140 },
+      { "label": "M", "price": 260 },
+      { "label": "L", "price": 390 }
+    ]
+  },
+  {
+    "id": 13,
+    "title": "Taqliya Stew",
+    "title_ar": "ملاح تقلية",
+    "description": "A rich fried onion and dry okra stew with minced meat — bold, smoky, and comforting.",
+    "description_ar": "ملاح تقلية سودانية باللحم المفروم والبصل المحمر والويكة، طعم لا يُنسى.",
+    "image": "maincourse",
+    "category": "stew",
+    "sale": false,
+    "sizes": [
+      { "label": "S", "price": 150 },
+      { "label": "M", "price": 280 },
+      { "label": "L", "price": 400 }
+    ]
+  },
+  {
+    "id": 14,
+    "title": "Qarasa Dama",
+    "title_ar": "قراصة دمعة",
+    "description": "Fresh fluffy Qarasa flatbread drenched in a luscious Sudanese meat and onion dama stew.",
+    "description_ar": "قراصة سودانية طرية مغطاة بدمعة اللحم والبصل المسبكة والمتبلة.",
+    "image": "maincourse",
+    "category": "stew",
+    "sale": false,
+    "sizes": [
+      { "label": "S", "price": 160 },
+      { "label": "M", "price": 300 },
+      { "label": "L", "price": 450 }
+    ]
+  },
+  {
+    "id": 15,
+    "title": "Black Salad (Eggplant)",
+    "title_ar": "سلطة اسود",
+    "description": "Smoky Sudanese mashed eggplant salad dressed with peanut paste, lemon, and garlic.",
+    "description_ar": "سلطة باذنجان أسود مشوي ومهروس مع الدكوة (زبدة الفول السوداني) والليمون والثوم.",
+    "image": "maincourse",
+    "category": "salad",
+    "sale": false,
+    "sizes": [
+      { "label": "S", "price": 55 },
+      { "label": "L", "price": 150 }
+    ]
+  },
+  {
+    "id": 16,
+    "title": "Carrot Salad",
+    "title_ar": "سلطة جزر",
+    "description": "Finely grated fresh carrots tossed with tangy lemon, cumin, and seasoned dressing.",
+    "description_ar": "سلطة جزر مبشور طازج متبلة بالليمون والكمون وزيت الزيتون.",
+    "image": "maincourse",
+    "category": "salad",
+    "sale": false,
+    "sizes": [
+      { "label": "S", "price": 55 },
+      { "label": "L", "price": 150 }
+    ]
+  },
+  {
+    "id": 17,
+    "title": "Fried Salad (Maqali)",
+    "title_ar": "سلطة مقالي",
+    "description": "Crispy fried eggplant and potato bites tossed in a special tangy and herb sauce.",
+    "description_ar": "سلطة مقالي مشكلة من الباذنجان والبطاطس المقرمشة مع تتبيلة خاصة وليمون.",
+    "image": "maincourse",
+    "category": "salad",
+    "sale": false,
+    "sizes": [
+      { "label": "S", "price": 60 },
+      { "label": "L", "price": 180 }
+    ]
+  },
+  {
+    "id": 18,
+    "title": "White Salad (Yogurt)",
+    "title_ar": "سلطة بيضاء",
+    "description": "Refreshing creamy yogurt salad with crisp cucumber and fresh mint.",
+    "description_ar": "سلطة زبادي بيضاء منعشة مع الخيار المفروم والنعناع والتوابل الهادئة.",
+    "image": "maincourse",
+    "category": "salad",
+    "sale": false,
+    "sizes": [
+      { "label": "S", "price": 60 },
+      { "label": "L", "price": 180 }
+    ]
+  }
+]
