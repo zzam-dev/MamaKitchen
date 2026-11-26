@@ -7,7 +7,7 @@ import {
   useComputedColorScheme,
   useMantineColorScheme,
 } from '@mantine/core';
-import { IconExternalLink, IconMoon, IconSun, IconToolsKitchen2 } from '@tabler/icons-react';
+import { IconExternalLink, IconLogout, IconMoon, IconSun, IconToolsKitchen2 } from '@tabler/icons-react';
 import { useNavigate } from 'react-router-dom';
 import { useLanguage } from '@/context/LanguageContext';
 import { brandTokens } from '@/theme';
@@ -17,6 +17,18 @@ export function AdminTopBar() {
   const computedColorScheme = useComputedColorScheme('light', { getInitialValueInEffect: false });
   const { t, isArabic, toggleLanguage } = useLanguage();
   const navigate = useNavigate();
+
+  const handleLogout = async () => {
+    try {
+      sessionStorage.removeItem('mama_admin_session');
+      // Tell the server to clear the HttpOnly session cookie
+      await fetch('/api/admin-auth', { method: 'DELETE', credentials: 'same-origin' });
+    } catch {
+      // If the request fails, still redirect to login
+    }
+    // Hard navigation so the middleware can verify the cleared cookie
+    window.location.href = '/admin-login';
+  };
 
   const isDark = computedColorScheme === 'dark';
 
@@ -100,6 +112,19 @@ export function AdminTopBar() {
           title={isDark ? (isArabic ? 'التبديل إلى الوضع النهاري' : 'Switch to light mode') : (isArabic ? 'التبديل إلى الوضع الليلي' : 'Switch to dark mode')}
         >
           {isDark ? <IconSun size={20} stroke={1.8} /> : <IconMoon size={20} stroke={1.8} />}
+        </ActionIcon>
+
+        {/* ELEMENT: Logout Button — clears session and returns to login screen */}
+        <ActionIcon
+          variant="subtle"
+          color="red"
+          size="lg"
+          radius="md"
+          onClick={handleLogout}
+          aria-label={isArabic ? 'تسجيل الخروج' : 'Sign out'}
+          title={isArabic ? 'تسجيل الخروج' : 'Sign out'}
+        >
+          <IconLogout size={20} stroke={1.8} />
         </ActionIcon>
       </Group>
     </Group>

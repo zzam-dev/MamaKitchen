@@ -36,3 +36,8 @@ node_modules/.tmp
 *.njsproj
 *.sln
 *.sw?
+# Local env secrets
+.env.local
+.env.*.local
+.vercel
+.env*
