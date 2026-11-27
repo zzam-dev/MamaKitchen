@@ -48,7 +48,9 @@ The content is organized as follows:
 .stylelintignore
 .stylelintrc.json
 api/admin-auth.ts
+api/image.ts
 api/menu.ts
+api/supabase.ts
 eslint.config.js
 index.html
 LICENSE
@@ -207,226 +209,6 @@ dist
       }
     ]
   }
-}
-````
-
-## File: api/menu.ts
-````typescript
-import { createClient } from '@supabase/supabase-js';
-import initialDishes from '../src/data/dishes.json';
-export const config = { runtime: 'edge' };
-const SESSION_PAYLOAD = 'mama_kitchen_admin_session_v1';
-const COOKIE_NAME = 'mama_admin_session';
-interface DbDishRow {
-  id: number;
-  title: string;
-  title_ar: string;
-  description: string;
-  description_ar: string;
-  image: string;
-  uploadedDataUrl?: string | null;
-  category: string;
-  sale: boolean;
-  available: boolean;
-  sizes: Array<{ label: string; price: number; discountedPrice?: number }>;
-  perPiecePrice?: number | null;
-  perPieceDiscountedPrice?: number | null;
-}
-interface ClientDish {
-  id: number;
-  title: string;
-  title_ar?: string;
-  description: string;
-  description_ar?: string;
-  image: string;
-  uploadedDataUrl?: string;
-  category: string;
-  sale: boolean;
-  available?: boolean;
-  sizes: Array<{ label: string; price: number; discountedPrice?: number }>;
-  perPiece?: { price: number; discountedPrice?: number };
-}
-function toDbRow(dish: ClientDish): DbDishRow {
-  return {
-    id: dish.id,
-    title: dish.title,
-    title_ar: dish.title_ar ?? '',
-    description: dish.description ?? '',
-    description_ar: dish.description_ar ?? '',
-    image: dish.image ?? 'maincourse',
-    uploadedDataUrl: dish.uploadedDataUrl ?? null,
-    category: dish.category ?? 'main',
-    sale: Boolean(dish.sale),
-    available: dish.available !== false,
-    sizes: dish.sizes ?? [],
-    perPiecePrice: dish.perPiece?.price ?? null,
-    perPieceDiscountedPrice: dish.perPiece?.discountedPrice ?? null,
-  };
-}
-function toClientDish(row: DbDishRow): ClientDish {
-  const dish: ClientDish = {
-    id: row.id,
-    title: row.title,
-    title_ar: row.title_ar || undefined,
-    description: row.description,
-    description_ar: row.description_ar || undefined,
-    image: row.image,
-    category: row.category,
-    sale: row.sale,
-    available: row.available,
-    sizes: row.sizes ?? [],
-  };
-  if (row.uploadedDataUrl) {
-    dish.uploadedDataUrl = row.uploadedDataUrl;
-  }
-  if (row.perPiecePrice != null && Number(row.perPiecePrice) > 0) {
-    dish.perPiece = {
-      price: Number(row.perPiecePrice),
-      ...(row.perPieceDiscountedPrice != null && Number(row.perPieceDiscountedPrice) > 0
-        ? { discountedPrice: Number(row.perPieceDiscountedPrice) }
-        : {}),
-    };
-  }
-  return dish;
-}
-function parseCookies(cookieHeader: string): Record<string, string> {
-  return Object.fromEntries(
-    cookieHeader
-      .split(';')
-      .map((c) => c.trim().split('='))
-      .filter(([k]) => k)
-      .map(([k, ...v]) => [k.trim(), v.join('=').trim()])
-  );
-}
-function safeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) {
-    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  }
-  return diff === 0;
-}
-async function isAdminAuthorized(req: Request): Promise<boolean> {
-  const cookies = parseCookies(req.headers.get('cookie') ?? '');
-  const token = cookies[COOKIE_NAME];
-  if (!token) return false;
-  const secret =
-    process.env.SESSION_SECRET ||
-    (process.env.ADMIN_PASS ? `session_${process.env.ADMIN_PASS}` : 'mama_kitchen_default_session_secret_2026');
-  const encoder = new TextEncoder();
-  const key = await crypto.subtle.importKey(
-    'raw',
-    encoder.encode(secret),
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign']
-  );
-  const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(SESSION_PAYLOAD));
-  const expected = Array.from(new Uint8Array(signature))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
-  return safeEqual(token, expected);
-}
-function json(data: unknown, status = 200): Response {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { 'Content-Type': 'application/json' },
-  });
-}
-export default async function handler(req: Request): Promise<Response> {
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!supabaseUrl || !supabaseKey) {
-    return json({ error: 'Supabase environment variables are not configured.' }, 500);
-  }
-  const supabase = createClient(supabaseUrl, supabaseKey);
-  if (req.method === 'GET') {
-    const { data, error } = await supabase
-      .from('dishes')
-      .select('*')
-      .order('id', { ascending: true });
-    if (error) {
-      return json({ error: error.message }, 500);
-    }
-    if (!data || data.length === 0) {
-      const seedRows = (initialDishes as unknown as ClientDish[]).map(toDbRow);
-      const { data: seeded, error: seedError } = await supabase
-        .from('dishes')
-        .upsert(seedRows, { onConflict: 'id' })
-        .select('*')
-        .order('id', { ascending: true });
-      if (seedError) {
-        return json({ error: seedError.message }, 500);
-      }
-      return json({ dishes: (seeded as DbDishRow[]).map(toClientDish) });
-    }
-    return json({ dishes: (data as DbDishRow[]).map(toClientDish) });
-  }
-  if (!(await isAdminAuthorized(req))) {
-    return json({ error: 'Unauthorized' }, 401);
-  }
-  if (req.method === 'POST') {
-    const body = (await req.json()) as { dish?: ClientDish; dishes?: ClientDish[] };
-    const items = body.dishes ?? (body.dish ? [body.dish] : []);
-    if (items.length === 0) {
-      return json({ error: 'Missing dish payload' }, 400);
-    }
-    const { error } = await supabase
-      .from('dishes')
-      .upsert(items.map(toDbRow), { onConflict: 'id' });
-    if (error) {
-      return json({ error: error.message }, 500);
-    }
-    return json({ success: true });
-  }
-  if (req.method === 'PATCH') {
-    const body = (await req.json()) as { id?: number; updated?: Partial<ClientDish> };
-    if (!body.id || !body.updated) {
-      return json({ error: 'Missing id or updated fields' }, 400);
-    }
-    const { data: existing, error: fetchError } = await supabase
-      .from('dishes')
-      .select('*')
-      .eq('id', body.id)
-      .single();
-    if (fetchError || !existing) {
-      return json({ error: 'Dish not found' }, 404);
-    }
-    const merged: ClientDish = {
-      ...toClientDish(existing as DbDishRow),
-      ...body.updated,
-      id: body.id,
-    };
-    const { error } = await supabase
-      .from('dishes')
-      .upsert(toDbRow(merged), { onConflict: 'id' });
-    if (error) {
-      return json({ error: error.message }, 500);
-    }
-    return json({ success: true });
-  }
-  if (req.method === 'DELETE') {
-    const url = new URL(req.url);
-    const reset = url.searchParams.get('reset') === 'true';
-    if (reset) {
-      await supabase.from('dishes').delete().neq('id', -1);
-      const seedRows = (initialDishes as unknown as ClientDish[]).map(toDbRow);
-      const { error } = await supabase.from('dishes').upsert(seedRows, { onConflict: 'id' });
-      if (error) return json({ error: error.message }, 500);
-      return json({ success: true });
-    }
-    const idParam = url.searchParams.get('id');
-    const id = idParam ? Number(idParam) : NaN;
-    if (!Number.isFinite(id)) {
-      return json({ error: 'Invalid dish id' }, 400);
-    }
-    const { error } = await supabase.from('dishes').delete().eq('id', id);
-    if (error) {
-      return json({ error: error.message }, 500);
-    }
-    return json({ success: true });
-  }
-  return json({ error: 'Method not allowed' }, 405);
 }
 ````
 
@@ -678,6 +460,451 @@ export default async function handler(req: Request): Promise<Response> {
 }
 ````
 
+## File: api/image.ts
+````typescript
+import { createClient } from '@supabase/supabase-js';
+import { config } from './admin-auth';
+export const config = { runtime: 'edge' };
+const SESSION_PAYLOAD = 'mama_kitchen_admin_session_v1';
+async function isAdminAuthorized(req: Request): Promise<boolean> {
+  const cookies = req.headers.get('cookie') ?? '';
+  const token = Object.fromEntries(
+    cookies.split(';').map((c) => c.trim().split('='))
+  )[config?.COOKIE_NAME ?? 'mama_admin_session'];
+  if (!token) {return false;}
+  const secret =
+    process.env.SESSION_SECRET ||
+    (config?.ADMIN_PASS ? `session_${config.ADMIN_PASS}` : 'mama_kitchen_default_session_secret_2026');
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    'raw',
+    encoder.encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+  const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(SESSION_PAYLOAD));
+  const expected = Array.from(new Uint8Array(signature))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+  return token === expected;
+}
+/** Upload dish image to Supabase Storage bucket "Product Images" */
+export default async function handler(req: Request): Promise<Response> {
+  // ── POST /api/admin/image ────────────────────────────────────────────────
+  if (req.method === 'POST') {
+    if (!(await isAdminAuthorized(req))) {
+      return new Response('Unauthorized', { status: 401 });
+    }
+    try {
+      const formData = await req.formData();
+      const file = formData.get('file') as File;
+      const productId = formData.get('productId') as string;
+      if (!file || !productId) {
+        return new Response('Missing file or productId', { status: 400 });
+      }
+      const ext = file.name.split('.').pop() ?? 'jpg';
+      const path = `${productId}.${ext}`;
+      const supabaseUrl = process.env.SUPABASE_URL ?? '';
+      const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
+      const supabase = createClient(supabaseUrl, supabaseServiceKey);
+      // Upload to bucket "Product Images"
+      const { error } = await supabase.storage.from('Product Images').upload(path, file, {
+        upsert: true,
+      });
+      if (error) {throw error;}
+      const { data } = supabase.storage.from('Product Images').getPublicUrl(path);
+      const publicUrl = data?.publicUrl ?? '';
+      return new Response(
+        JSON.stringify({ publicUrl, storagePath: path }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'An unknown error occurred';
+      return new Response(JSON.stringify({ error: message }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+  }
+  if (req.method === 'DELETE') {
+    if (!(await isAdminAuthorized(req))) {
+      return new Response('Unauthorized', { status: 401 });
+    }
+    try {
+      const url = new URL(req.url);
+      const path = url.searchParams.get('path') ?? '';
+      if (!path) {
+        return new Response('Missing path parameter', { status: 400 });
+      }
+      const supabaseUrl = process.env.SUPABASE_URL ?? '';
+      const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
+      const supabase = createClient(supabaseUrl, supabaseServiceKey);
+      await supabase.storage.from('Product Images').remove([path]);
+      return new Response(JSON.stringify({ success: true }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'An unknown error occurred';
+      return new Response(JSON.stringify({ error: message }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+  }
+  return new Response('Method not allowed', { status: 405 });
+}
+````
+
+## File: api/menu.ts
+````typescript
+import { createClient } from '@supabase/supabase-js';
+import initialDishes from '../src/data/dishes.json';
+export const config = { runtime: 'edge' };
+const SESSION_PAYLOAD = 'mama_kitchen_admin_session_v1';
+const COOKIE_NAME = 'mama_admin_session';
+interface DbDishRow {
+  id: number;
+  title: string;
+  title_ar: string;
+  description: string;
+  description_ar: string;
+  image: string;
+  uploadedDataUrl?: string | null;
+  category: string;
+  sale: boolean;
+  available: boolean;
+  sizes: Array<{ label: string; price: number; discountedPrice?: number }>;
+  perPiecePrice?: number | null;
+  perPieceDiscountedPrice?: number | null;
+}
+interface ClientDish {
+  id: number;
+  title: string;
+  title_ar?: string;
+  description: string;
+  description_ar?: string;
+  image: string;
+  uploadedDataUrl?: string;
+  category: string;
+  sale: boolean;
+  available?: boolean;
+  sizes: Array<{ label: string; price: number; discountedPrice?: number }>;
+  perPiece?: { price: number; discountedPrice?: number };
+}
+function toDbRow(dish: ClientDish): DbDishRow {
+  return {
+    id: dish.id,
+    title: dish.title,
+    title_ar: dish.title_ar ?? '',
+    description: dish.description ?? '',
+    description_ar: dish.description_ar ?? '',
+    image: dish.image ?? 'maincourse',
+    uploadedDataUrl: dish.uploadedDataUrl ?? null,
+    category: dish.category ?? 'main',
+    sale: Boolean(dish.sale),
+    available: dish.available !== false,
+    sizes: dish.sizes ?? [],
+    perPiecePrice: dish.perPiece?.price ?? null,
+    perPieceDiscountedPrice: dish.perPiece?.discountedPrice ?? null,
+    storage_path: dish.storagePath ?? null,
+  };
+}
+function toClientDish(row: DbDishRow): ClientDish {
+  const dish: ClientDish = {
+    id: row.id,
+    title: row.title,
+    title_ar: row.title_ar || undefined,
+    description: row.description,
+    description_ar: row.description_ar || undefined,
+    image: row.image,
+    category: row.category,
+    sale: row.sale,
+    available: row.available,
+    sizes: row.sizes ?? [],
+    storagePath: row.storage_path ?? undefined,
+  };
+  if (row.uploadedDataUrl) {
+    dish.uploadedDataUrl = row.uploadedDataUrl;
+  }
+  if (row.perPiecePrice != null && Number(row.perPiecePrice) > 0) {
+    dish.perPiece = {
+      price: Number(row.perPiecePrice),
+      ...(row.perPieceDiscountedPrice != null && Number(row.perPieceDiscountedPrice) > 0
+        ? { discountedPrice: Number(row.perPieceDiscountedPrice) }
+        : {}),
+    };
+  }
+  return dish;
+}
+function parseCookies(cookieHeader: string): Record<string, string> {
+  return Object.fromEntries(
+    cookieHeader
+      .split(';')
+      .map((c) => c.trim().split('='))
+      .filter(([k]) => k)
+      .map(([k, ...v]) => [k.trim(), v.join('=').trim()])
+  );
+}
+function safeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) {return false;}
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) {
+    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return diff === 0;
+}
+async function isAdminAuthorized(req: Request): Promise<boolean> {
+  const cookies = parseCookies(req.headers.get('cookie') ?? '');
+  const token = cookies[COOKIE_NAME];
+  if (!token) {return false;}
+  const secret =
+    process.env.SESSION_SECRET ||
+    (process.env.ADMIN_PASS ? `session_${process.env.ADMIN_PASS}` : 'mama_kitchen_default_session_secret_2026');
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    'raw',
+    encoder.encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+  const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(SESSION_PAYLOAD));
+  const expected = Array.from(new Uint8Array(signature))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+  return safeEqual(token, expected);
+}
+function json(data: unknown, status = 200): Response {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+export default async function handler(req: Request): Promise<Response> {
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !supabaseKey) {
+    return json({ error: 'Supabase environment variables are not configured.' }, 500);
+  }
+  const supabase = createClient(supabaseUrl, supabaseKey);
+  if (req.method === 'GET') {
+    const { data, error } = await supabase
+      .from('dishes')
+      .select('*')
+      .order('id', { ascending: true });
+    if (error) {
+      return json({ error: error.message }, 500);
+    }
+    if (!data || data.length === 0) {
+      const seedRows = (initialDishes as unknown as ClientDish[]).map(toDbRow);
+      const { data: seeded, error: seedError } = await supabase
+        .from('dishes')
+        .upsert(seedRows, { onConflict: 'id' })
+        .select('*')
+        .order('id', { ascending: true });
+      if (seedError) {
+        return json({ error: seedError.message }, 500);
+      }
+      return json({ dishes: (seeded as DbDishRow[]).map(toClientDish) });
+    }
+    return json({ dishes: (data as DbDishRow[]).map(toClientDish) });
+  }
+  if (!(await isAdminAuthorized(req))) {
+    return json({ error: 'Unauthorized' }, 401);
+  }
+  if (req.method === 'POST') {
+    const body = (await req.json()) as { dish?: ClientDish; dishes?: ClientDish[] };
+    const items = body.dishes ?? (body.dish ? [body.dish] : []);
+    if (items.length === 0) {
+      return json({ error: 'Missing dish payload' }, 400);
+    }
+    const { error } = await supabase
+      .from('dishes')
+      .upsert(items.map(toDbRow), { onConflict: 'id' });
+    if (error) {
+      return json({ error: error.message }, 500);
+    }
+    return json({ success: true });
+  }
+  if (req.method === 'PATCH') {
+    const body = (await req.json()) as { id?: number; updated?: Partial<ClientDish> };
+    if (!body.id || !body.updated) {
+      return json({ error: 'Missing id or updated fields' }, 400);
+    }
+    const { data: existing, error: fetchError } = await supabase
+      .from('dishes')
+      .select('*')
+      .eq('id', body.id)
+      .single();
+    if (fetchError || !existing) {
+      return json({ error: 'Dish not found' }, 404);
+    }
+    const merged: ClientDish = {
+      ...toClientDish(existing as DbDishRow),
+      ...body.updated,
+      id: body.id,
+    };
+    const { error } = await supabase
+      .from('dishes')
+      .upsert(toDbRow(merged), { onConflict: 'id' });
+    if (error) {
+      return json({ error: error.message }, 500);
+    }
+    return json({ success: true });
+  }
+  if (req.method === 'DELETE') {
+    const url = new URL(req.url);
+    const reset = url.searchParams.get('reset') === 'true';
+    if (reset) {
+      await supabase.from('dishes').delete().neq('id', -1);
+      const seedRows = (initialDishes as unknown as ClientDish[]).map(toDbRow);
+      const { error } = await supabase.from('dishes').upsert(seedRows, { onConflict: 'id' });
+      if (error) {return json({ error: error.message }, 500);}
+      return json({ success: true });
+    }
+    const idParam = url.searchParams.get('id');
+    const id = idParam ? Number(idParam) : NaN;
+    if (!Number.isFinite(id)) {
+      return json({ error: 'Invalid dish id' }, 400);
+    }
+    const { error } = await supabase.from('dishes').delete().eq('id', id);
+    if (error) {
+      return json({ error: error.message }, 500);
+    }
+    return json({ success: true });
+  }
+  return json({ error: 'Method not allowed' }, 405);
+}
+````
+
+## File: api/supabase.ts
+````typescript
+import { createClient } from '@supabase/supabase-js';
+const supabaseUrl = process.env.SUPABASE_URL || '';
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+export const supabase = createClient(supabaseUrl, supabaseServiceKey);
+export interface UpdateProductsRequestBody {
+  products: unknown[];
+  googleToken: string;
+}
+export interface GoogleTokenInfo {
+  email?: string;
+  [key: string]: unknown;
+}
+export interface ApiRequest {
+  method?: string;
+  body: UpdateProductsRequestBody;
+}
+export interface ApiResponse {
+  status: (statusCode: number) => ApiResponse;
+  json: (data: { success?: boolean; message?: string; error?: string }) => void;
+}
+export default async function handler(req: ApiRequest, _res: ApiResponse) {
+  // ── GET /api/menu (Public) ────────────────────────────────────────────────
+  if (req.method === 'GET') {
+    const { data, error } = await supabase
+      .from('dishes')
+      .select('*')
+      .order('id', { ascending: true });
+    if (error) {
+      return json({ error: error.message }, 500);
+    }
+    if (!data || data.length === 0) {
+      const seedRows = (initialDishes as unknown as ClientDish[]).map(toDbRow);
+      const { data: seeded, error: seedError } = await supabase
+        .from('dishes')
+        .upsert(seedRows, { onConflict: 'id' })
+        .select('*')
+        .order('id', { ascending: true });
+      if (seedError) {
+        return json({ error: seedError.message }, 500);
+      }
+      return json({ dishes: (seeded as DbDishRow[]).map(toClientDish) });
+    }
+    return json({ dishes: (data as DbDishRow[]).map(toClientDish) });
+  }
+  if (!(await isAdminAuthorized(req))) {
+    return json({ error: 'Unauthorized' }, 401);
+  }
+  if (req.method === 'POST') {
+    const body = (await req.json()) as { dish?: ClientDish; dishes?: ClientDish[] };
+    const items = body.dishes ?? (body.dish ? [body.dish] : []);
+    if (items.length === 0) {
+      return json({ error: 'Missing dish payload' }, 400);
+    }
+    const { error } = await supabase
+      .from('dishes')
+      .upsert(items.map(toDbRow), { onConflict: 'id' });
+    if (error) {
+      return json({ error: error.message }, 500);
+    }
+    return json({ success: true });
+  }
+  if (req.method === 'PATCH') {
+    const body = (await req.json()) as { id?: number; updated?: Partial<ClientDish> };
+    if (!body.id || !body.updated) {
+      return json({ error: 'Missing id or updated fields' }, 400);
+    }
+    const { data: existing, error: fetchError } = await supabase
+      .from('dishes')
+      .select('*')
+      .eq('id', body.id)
+      .single();
+    if (fetchError || !existing) {
+      return json({ error: 'Dish not found' }, 404);
+    }
+    const merged: ClientDish = {
+      ...toClientDish(existing as DbDishRow),
+      ...body.updated,
+      id: body.id,
+    };
+    const { error } = await supabase
+      .from('dishes')
+      .upsert(toDbRow(merged), { onConflict: 'id' });
+    if (error) {
+      return json({ error: error.message }, 500);
+    }
+    return json({ success: true });
+  }
+  if (req.method === 'DELETE') {
+    const url = new URL(req.url);
+    const reset = url.searchParams.get('reset') === 'true';
+    if (reset) {
+      await supabase.from('dishes').delete().neq('id', -1);
+      const seedRows = (initialDishes as unknown as ClientDish[]).map(toDbRow);
+      const { error } = await supabase.from('dishes').upsert(seedRows, { onConflict: 'id' });
+      if (error) {return json({ error: error.message }, 500);}
+      return json({ success: true });
+    }
+    const idParam = url.searchParams.get('id');
+    const id = idParam ? Number(idParam) : NaN;
+    if (!Number.isFinite(id)) {
+      return json({ error: 'Invalid dish id' }, 400);
+    }
+    const { error } = await supabase.from('dishes').delete().eq('id', id);
+    if (error) {
+      return json({ error: error.message }, 500);
+    }
+    return json({ success: true });
+  }
+  return json({ error: 'Method not allowed' }, 405);
+}
+export const STORAGE_BUCKET = 'Product Images';
+export async function uploadProductImage(productId: number, file: File): Promise<string | null> {
+  const ext = file.name.split('.').pop() ?? 'jpg';
+  const path = `${productId}.${ext}`;
+  const { error } = await supabase.storage.from(STORAGE_BUCKET).upload(path, file, { upsert: true });
+  if (error) {throw error;}
+  const { data } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(path);
+  return data.publicUrl;
+}
+export async function deleteProductImage(path: string): Promise<void> {
+  await supabase.storage.from(STORAGE_BUCKET).remove([path]);
+}
+````
+
 ## File: LICENSE
 ````
 MIT License
@@ -701,71 +928,6 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-````
-
-## File: middleware.ts
-````typescript
-export const config = {
-  matcher: ['/admin', '/admin/:path*', '/dashboard', '/dashboard/:path*'],
-};
-const SESSION_PAYLOAD = 'mama_kitchen_admin_session_v1';
-const COOKIE_NAME = 'mama_admin_session';
-function parseCookies(cookieHeader: string): Record<string, string> {
-  return Object.fromEntries(
-    cookieHeader
-      .split(';')
-      .map((c) => c.trim().split('='))
-      .filter(([k]) => k)
-      .map(([k, ...v]) => [k.trim(), v.join('=').trim()])
-  );
-}
-function safeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) {
-    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  }
-  return diff === 0;
-}
-async function computeExpectedToken(secret: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const key = await crypto.subtle.importKey(
-    'raw',
-    encoder.encode(secret),
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign']
-  );
-  const signature = await crypto.subtle.sign(
-    'HMAC',
-    key,
-    encoder.encode(SESSION_PAYLOAD)
-  );
-  return Array.from(new Uint8Array(signature))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
-}
-export default async function middleware(request: Request): Promise<Response | undefined> {
-  const cookieHeader = request.headers.get('cookie') ?? '';
-  const cookies = parseCookies(cookieHeader);
-  const sessionCookie = cookies[COOKIE_NAME];
-  // No cookie present — redirect to login page
-  if (!sessionCookie) {
-    return Response.redirect(new URL('/admin-login', request.url), 302);
-  }
-  const secret =
-    process.env.SESSION_SECRET ||
-    (process.env.ADMIN_PASS ? `session_${process.env.ADMIN_PASS}` : 'mama_kitchen_default_session_secret_2026');
-  try {
-    const expected = await computeExpectedToken(secret);
-    if (!safeEqual(sessionCookie, expected)) {
-      return Response.redirect(new URL('/admin-login', request.url), 302);
-    }
-  } catch {
-    return Response.redirect(new URL('/admin-login', request.url), 302);
-  }
-  return undefined;
-}
 ````
 
 ## File: public/favicon.svg
@@ -922,160 +1084,6 @@ export const API_ENDPOINTS = {
   ADMIN_MENU: '/api/admin/menu',
 } as const;
 export type ApiEndpoints = typeof API_ENDPOINTS;
-````
-
-## File: src/api/supabase.ts
-````typescript
-import { createClient } from '@supabase/supabase-js';
-const supabaseUrl = process.env.SUPABASE_URL || '';
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-export const supabase = createClient(supabaseUrl, supabaseServiceKey);
-export interface UpdateProductsRequestBody {
-    products: unknown[];
-    googleToken: string;
-}
-export interface GoogleTokenInfo {
-    email?: string;
-    [key: string]: unknown;
-}
-export interface ApiRequest {
-    method?: string;
-    body: UpdateProductsRequestBody;
-}
-export interface ApiResponse {
-    status: (statusCode: number) => ApiResponse;
-    json: (data: { success?: boolean; message?: string; error?: string }) => void;
-}
-export default async function handler(req: ApiRequest, res: ApiResponse) {
-    // 1. Only allow secure POST requests from your dashboard
-    if (req.method !== 'POST') {
-        return res.status(405).json({ error: 'Method not allowed' });
-    }
-    try {
-        const { products, googleToken } = req.body;
-        const googleVerify = await fetch(
-            `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(googleToken)}`
-        );
-        const tokenInfo = (await googleVerify.json()) as GoogleTokenInfo;
-        if (!googleVerify.ok || tokenInfo.email !== 'the_owner_email@gmail.com') {
-            return res.status(401).json({ error: 'Unauthorized Google Account' });
-        }
-        await supabase.from('products').delete().neq('id', 0);
-        const { error } = await supabase.from('products').insert(products);
-        if (error) throw error;
-        return res.status(200).json({ success: true, message: 'Inventory updated instantly!' });
-    } catch (err) {
-        const message = err instanceof Error ? err.message : 'An unknown error occurred';
-        return res.status(500).json({ error: message });
-    }
-}
-````
-
-## File: src/App.tsx
-````typescript
-import '@mantine/core/styles.css';
-import { MantineColorScheme, MantineColorSchemeManager, MantineProvider } from '@mantine/core';
-import { CartProvider } from './context/CartContext';
-import { LanguageProvider } from './context/LanguageContext';
-import { MenuProvider } from './context/MenuContext';
-import { Router } from './Router';
-import { theme } from './theme';
-export function createUnifiedColorSchemeManager(): MantineColorSchemeManager {
-  return {
-    get: (defaultValue: MantineColorScheme) => {
-      if (typeof window === 'undefined') return defaultValue;
-      try {
-        const val =
-          localStorage.getItem('mantine-color-scheme-value') ||
-          localStorage.getItem('mama-kitchen-color-scheme');
-        if (val === 'dark' || val === 'light' || val === 'auto') return val;
-        return defaultValue;
-      } catch {
-        return defaultValue;
-      }
-    },
-    set: (value: MantineColorScheme) => {
-      try {
-        localStorage.setItem('mantine-color-scheme-value', value);
-        localStorage.setItem('mama-kitchen-color-scheme', value);
-      } catch {
-      }
-    },
-    subscribe: (onUpdate: (colorScheme: MantineColorScheme) => void) => {
-      const listener = (e: StorageEvent) => {
-        if (e.key === 'mantine-color-scheme-value' || e.key === 'mama-kitchen-color-scheme') {
-          if (e.newValue === 'dark' || e.newValue === 'light' || e.newValue === 'auto') {
-            onUpdate(e.newValue);
-          }
-        }
-      };
-      window.addEventListener('storage', listener);
-      return () => window.removeEventListener('storage', listener);
-    },
-    unsubscribe: () => {},
-    clear: () => {
-      try {
-        localStorage.removeItem('mantine-color-scheme-value');
-        localStorage.removeItem('mama-kitchen-color-scheme');
-      } catch {
-      }
-    },
-  };
-}
-const colorSchemeManager = createUnifiedColorSchemeManager();
-export default function App() {
-  return (
-    <MantineProvider
-      theme={theme}
-      colorSchemeManager={colorSchemeManager}
-      defaultColorScheme="light"
-    >
-      <LanguageProvider>
-        <MenuProvider>
-          <CartProvider>
-            <Router />
-          </CartProvider>
-        </MenuProvider>
-      </LanguageProvider>
-    </MantineProvider>
-  );
-}
-````
-
-## File: src/archive/Home.page.v1.tsx
-````typescript
-import { Badge, Card, CardSection, Group, Image, Text } from '@mantine/core';
-import { useHover } from '@mantine/hooks';
-import image from '@/assets/images/agashi.jpg';
-export function HomePage() {
-  const { hovered, ref } = useHover();
-  return (
-    <>
-      <Card w={280} shadow="sm" withBorder radius={'lg'} ref={ref}>
-        <CardSection>
-          <Image height={160} src={image} alt="Norway" />
-        </CardSection>
-        <Group justify="space-between" align="center" mt="md" mb="xs">
-          <Group gap="xs" align="center">
-            <Text fw={600}>Agashi</Text>
-            <Badge color="red">Sale</Badge>
-          </Group>
-          <Group gap={6} align="baseline">
-            <Text fw={700} size="sm">
-              55 EGP
-            </Text>
-            <Text td="line-through" c="dimmed" size="xs">
-              75 EGP
-            </Text>
-          </Group>
-        </Group>
-        <Text size="sm" c="dimmed">
-          A Sudanese delicacy made with the hands of its mothers
-        </Text>
-      </Card>
-    </>
-  );
-}
 ````
 
 ## File: src/assets/images/index.ts
@@ -2141,206 +2149,6 @@ export { CartFooter } from './CartFooter';
 export { SUPPLEMENTARY_ADDONS, type SupplementaryAddon } from './cartAddons';
 ````
 
-## File: src/components/DishCard/DishCard.tsx
-````typescript
-import React, { useState } from 'react';
-import { IconCheck } from '@tabler/icons-react';
-import {
-  Box,
-  Button,
-  Card,
-  Group,
-  Image,
-  Stack,
-  Text,
-  Transition,
-  useComputedColorScheme,
-} from '@mantine/core';
-import { useHover } from '@mantine/hooks';
-import { useCart } from '@/context/CartContext';
-import { useLanguage } from '@/context/LanguageContext';
-import { brandTokens, getNeumorphicCardStyle } from '@/styles/neumorphic';
-import type { DishCardProps, DishSize, SizeLabel } from './DishCard.types';
-import { DishDetailModal } from './DishDetailModal';
-import { PriceTagCapsule } from './PriceTagCapsule';
-import { SaleBadge } from './SaleBadge';
-export function DishCard({
-  id,
-  title,
-  title_ar,
-  description,
-  description_ar,
-  image,
-  sale,
-  sizes,
-  perPiece,
-  available = true,
-}: DishCardProps) {
-  const { hovered, ref } = useHover();
-  const { addItem } = useCart();
-  const { t, isArabic } = useLanguage();
-  const computedColorScheme = useComputedColorScheme('light', { getInitialValueInEffect: false });
-  const isDark = computedColorScheme === 'dark';
-  const [modalOpen, setModalOpen] = useState(false);
-  const [added, setAdded] = useState(false);
-  const safeSizes = sizes && sizes.length > 0 ? sizes : [{ label: 'S' as SizeLabel, price: 0 }];
-  const defaultSize = safeSizes[0];
-  const currentTitle = isArabic && title_ar ? title_ar : title;
-  const secondaryTitle = isArabic ? title : title_ar;
-  const currentDesc = isArabic && description_ar ? description_ar : description;
-  const isSale = Boolean(sale && (defaultSize?.discountedPrice != null || perPiece?.discountedPrice != null));
-  const displayPrice = isSale && defaultSize?.discountedPrice != null
-    ? defaultSize.discountedPrice
-    : defaultSize.price;
-  const originalPrice = isSale && defaultSize?.discountedPrice != null
-    ? defaultSize.price
-    : null;
-  const handleQuickAddToCart = (e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
-    if (!available) return;
-    addItem({
-      dishId: id ?? Math.floor(Math.random() * 100000),
-      title: currentTitle,
-      sizeLabel: defaultSize.label,
-      unitPrice: displayPrice,
-      quantity: 1,
-      image,
-    });
-    setAdded(true);
-    setTimeout(() => setAdded(false), 1400);
-  };
-  const handleModalAddToCart = (selection: { sizeLabel: string; unitPrice: number; quantity: number }) => {
-    if (!available) return;
-    addItem({
-      dishId: id ?? Math.floor(Math.random() * 100000),
-      title: currentTitle,
-      sizeLabel: selection.sizeLabel,
-      unitPrice: selection.unitPrice,
-      quantity: selection.quantity,
-      image,
-    });
-  };
-  return (
-    <>
-      <Card
-        ref={ref}
-        radius="lg"
-        p={0}
-        withBorder={false}
-        onClick={() => available && setModalOpen(true)}
-        style={getNeumorphicCardStyle(isDark, hovered, available)}
-      >
-        {}
-        {!available && (
-          <Box
-            pos="absolute"
-            top={0}
-            left={0}
-            right={0}
-            bottom={0}
-            style={{
-              zIndex: 10,
-              backgroundColor: 'rgba(28, 20, 16, 0.55)',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              borderRadius: 'inherit',
-              pointerEvents: 'auto',
-              cursor: 'not-allowed',
-            }}
-          >
-            <SaleBadge variant="dark" size="md">
-              {t.unavailable}
-            </SaleBadge>
-          </Box>
-        )}
-        {}
-        <Box pos="relative">
-          <Image
-            src={image}
-            alt={currentTitle}
-            height={135}
-            style={{ objectFit: 'cover', display: 'block', width: '100%' }}
-          />
-          <Transition mounted={sale && hovered} transition="fade" duration={200}>
-            {(styles) => (
-              <Box
-                pos="absolute"
-                top={0}
-                left={0}
-                right={0}
-                bottom={0}
-                style={{ ...styles, background: 'rgba(0,0,0,0.18)' }}
-              />
-            )}
-          </Transition>
-          {sale && <SaleBadge absolute />}
-        </Box>
-        {}
-        <Stack gap={6} p="xs" pt="sm">
-          <Text fw={700} size="sm" lh={1.2} lineClamp={1}>
-            {currentTitle}
-          </Text>
-          <Text
-            size="xs"
-            lineClamp={2}
-            style={{ color: isDark ? '#D4BFA8' : '#5a3a28', minHeight: 32 }}
-          >
-            {currentDesc}
-          </Text>
-          <Group justify="space-between" align="center" mt={4}>
-            <PriceTagCapsule
-              isDark={isDark}
-              isOnSale={isSale}
-              available={available}
-              displayPrice={displayPrice}
-              originalPrice={originalPrice}
-            />
-            {available && (
-              <Button
-                size="xs"
-                radius="md"
-                leftSection={added ? <IconCheck size={14} stroke={2.5} /> : undefined}
-                onClick={handleQuickAddToCart}
-                style={{
-                  fontWeight: 800,
-                  transition: 'background-color 150ms ease, border-color 150ms ease, color 150ms ease',
-                  backgroundColor: added ? '#2f9e44' : isDark ? '#2e2019' : '#FFF3F0',
-                  color: added ? '#FFFFFF' : brandTokens.red,
-                  border: `1px solid ${
-                    added ? '#40c057' : isDark ? 'rgba(255, 255, 255, 0.12)' : 'rgba(0, 0, 0, 0.08)'
-                  }`,
-                  boxShadow: added
-                    ? '0 2px 8px rgba(47, 158, 68, 0.3)'
-                    : '0 1px 3px rgba(0,0,0,0.05)',
-                }}
-              >
-                {added ? t.addedToOrder : t.addToOrder}
-              </Button>
-            )}
-          </Group>
-        </Stack>
-      </Card>
-      {}
-      <DishDetailModal
-        opened={modalOpen}
-        onClose={() => setModalOpen(false)}
-        title={currentTitle}
-        secondaryTitle={secondaryTitle}
-        description={currentDesc}
-        image={image}
-        sale={Boolean(sale)}
-        sizes={safeSizes}
-        perPiece={perPiece}
-        isDark={isDark}
-        onAddToCart={handleModalAddToCart}
-      />
-    </>
-  );
-}
-````
-
 ## File: src/components/DishCard/DishCard.types.ts
 ````typescript
 export type SizeLabel = 'S' | 'M' | 'L';
@@ -2366,851 +2174,6 @@ export interface DishCardProps {
   perPiece?: PerPieceOption;
   category?: string;
   available?: boolean;
-}
-````
-
-## File: src/components/DishCard/DishDetailModal.tsx
-````typescript
-import React, { useState } from 'react';
-import { IconCheck, IconMinus, IconPlus, IconShoppingCart } from '@tabler/icons-react';
-import {
-  ActionIcon,
-  Box,
-  Button,
-  Divider,
-  Group,
-  Image,
-  Modal,
-  Stack,
-  Text,
-} from '@mantine/core';
-import { useLanguage } from '@/context/LanguageContext';
-import {
-  brandTokens,
-  getNeumorphicChipStyle,
-  getNeumorphicControlStyle,
-  getNeumorphicModalStyles,
-  getNeumorphicStepperContainerStyle,
-  neumorphicTokens,
-} from '@/styles/neumorphic';
-import type { DishSize, PerPieceOption, SizeLabel } from './DishCard.types';
-import { SaleBadge } from './SaleBadge';
-const ALL_SIZES: SizeLabel[] = ['S', 'M', 'L'];
-export interface DishDetailModalProps {
-  opened: boolean;
-  onClose: () => void;
-  title: string;
-  secondaryTitle?: string;
-  description: string;
-  image: string;
-  sale: boolean;
-  sizes: DishSize[];
-  perPiece?: PerPieceOption;
-  isDark: boolean;
-  onAddToCart: (selection: { sizeLabel: string; unitPrice: number; quantity: number }) => void;
-}
-export function DishDetailModal({
-  opened,
-  onClose,
-  title,
-  secondaryTitle,
-  description,
-  image,
-  sale,
-  sizes,
-  perPiece,
-  isDark,
-  onAddToCart,
-}: DishDetailModalProps) {
-  const { t, isArabic } = useLanguage();
-  const safeSizes = sizes && sizes.length > 0 ? sizes : [{ label: 'S' as SizeLabel, price: 0 }];
-  const [selectedType, setSelectedType] = useState<'size' | 'piece'>('size');
-  const [selectedSize, setSelectedSize] = useState<DishSize>(safeSizes[0]);
-  const [pieceQty, setPieceQty] = useState<number>(1);
-  const [added, setAdded] = useState(false);
-  const isPieceMode = selectedType === 'piece' && !!perPiece;
-  const isSizeSale = Boolean(sale && selectedSize?.discountedPrice != null);
-  const isPieceSale = Boolean(sale && perPiece?.discountedPrice != null);
-  const isOnSale = isPieceMode ? isPieceSale : isSizeSale;
-  const originalUnitPrice = isPieceMode
-    ? (perPiece?.price ?? 0)
-    : (selectedSize?.price ?? 0);
-  const unitPrice = isPieceMode
-    ? isPieceSale
-      ? perPiece.discountedPrice!
-      : perPiece.price
-    : selectedSize
-      ? isSizeSale
-        ? selectedSize.discountedPrice!
-        : selectedSize.price
-      : 0;
-  const displayPrice = isPieceMode ? unitPrice * pieceQty : unitPrice;
-  const originalDisplayPrice = isPieceMode ? originalUnitPrice * pieceQty : originalUnitPrice;
-  const handleAdd = () => {
-    onAddToCart({
-      sizeLabel: isPieceMode ? (isArabic ? 'قطعة' : 'Pc') : selectedSize.label,
-      unitPrice,
-      quantity: isPieceMode ? pieceQty : 1,
-    });
-    setAdded(true);
-    setTimeout(() => setAdded(false), 1400);
-  };
-  return (
-    <Modal
-      opened={opened}
-      onClose={onClose}
-      size="lg"
-      radius="lg"
-      centered
-      title={
-        <Group gap="xs" align="center" wrap="nowrap">
-          <Text fw={800} size="lg" style={{ color: isDark ? '#FFF9F0' : '#2A170A' }}>
-            {title}
-          </Text>
-          {sale && <SaleBadge />}
-        </Group>
-      }
-      styles={getNeumorphicModalStyles(isDark)}
-    >
-      <Stack gap="md">
-        {}
-        <Box
-          pos="relative"
-          style={{
-            borderRadius: 12,
-            overflow: 'hidden',
-            boxShadow: neumorphicTokens.shadows.image[isDark ? 'dark' : 'light'],
-          }}
-        >
-          <Image
-            src={image}
-            alt={title}
-            height={240}
-            style={{ objectFit: 'cover', width: '100%', display: 'block' }}
-          />
-          {sale && <SaleBadge absolute size="md" />}
-        </Box>
-        {}
-        {secondaryTitle && (
-          <Text
-            size="xs"
-            fw={700}
-            style={{ color: isDark ? '#C9A880' : '#8A6340', marginTop: -6 }}
-          >
-            {secondaryTitle}
-          </Text>
-        )}
-        {}
-        <Text
-          size="sm"
-          style={{
-            color: isDark ? '#FDF2F0' : '#2A170A',
-            fontWeight: 500,
-            lineHeight: 1.7,
-          }}
-        >
-          {description}
-        </Text>
-        <Divider color={`${brandTokens.gold}33`} />
-        {}
-        <Stack gap={6}>
-          <Text
-            size="xs"
-            fw={700}
-            tt="uppercase"
-            style={{ color: isDark ? '#C9A880' : '#7A5235', letterSpacing: '0.04em' }}
-          >
-            {t.sizesConfig || t.size}
-          </Text>
-          <Group gap={8} wrap="wrap">
-            {ALL_SIZES.map((label) => {
-              const sizeObj = sizes.find((s) => s.label === label);
-              if (!sizeObj) return null;
-              const isSelected = selectedType === 'size' && selectedSize.label === label;
-              const hasDiscount = Boolean(sale && sizeObj.discountedPrice != null);
-              const displayP = hasDiscount ? sizeObj.discountedPrice! : sizeObj.price;
-              return (
-                <Box
-                  key={label}
-                  onClick={() => {
-                    setSelectedSize(sizeObj);
-                    setSelectedType('size');
-                  }}
-                  style={getNeumorphicChipStyle(isDark, isSelected)}
-                >
-                  <Text
-                    fw={900}
-                    size="sm"
-                    style={{
-                      color: isSelected ? '#FFFFFF' : isDark ? '#E8A89E' : brandTokens.red,
-                    }}
-                  >
-                    {label}
-                  </Text>
-                  <Group gap={4} align="baseline" wrap="nowrap">
-                    {hasDiscount && (
-                      <Text
-                        size="xs"
-                        fw={700}
-                        style={{
-                          color: isSelected
-                            ? 'rgba(255, 255, 255, 0.75)'
-                            : isDark
-                              ? 'rgba(255, 255, 255, 0.45)'
-                              : 'rgba(140, 28, 19, 0.55)',
-                          textDecoration: 'line-through',
-                        }}
-                      >
-                        {sizeObj.price}
-                      </Text>
-                    )}
-                    <Text
-                      fw={800}
-                      size="sm"
-                      style={{
-                        color: isSelected ? '#FFE066' : isDark ? '#FFE066' : '#7A1C14',
-                      }}
-                    >
-                      {displayP} {t.egp}
-                    </Text>
-                  </Group>
-                </Box>
-              );
-            })}
-            {perPiece && (
-              <Box
-                onClick={() => setSelectedType('piece')}
-                style={getNeumorphicChipStyle(isDark, isPieceMode)}
-              >
-                <Text
-                  fw={900}
-                  size="sm"
-                  style={{
-                    color: isPieceMode ? '#FFFFFF' : isDark ? '#E8A89E' : brandTokens.red,
-                  }}
-                >
-                  {t.perPieceLabel}
-                </Text>
-                <Group gap={4} align="baseline" wrap="nowrap">
-                  {sale && perPiece.discountedPrice != null && (
-                    <Text
-                      size="xs"
-                      fw={700}
-                      style={{
-                        color: isPieceMode
-                          ? 'rgba(255, 255, 255, 0.75)'
-                          : isDark
-                            ? 'rgba(255, 255, 255, 0.45)'
-                            : 'rgba(140, 28, 19, 0.55)',
-                        textDecoration: 'line-through',
-                      }}
-                    >
-                      {perPiece.price}
-                    </Text>
-                  )}
-                  <Text
-                    fw={800}
-                    size="sm"
-                    style={{
-                      color: isPieceMode ? '#FFE066' : isDark ? '#FFE066' : '#7A1C14',
-                    }}
-                  >
-                    {sale && perPiece.discountedPrice != null
-                      ? perPiece.discountedPrice
-                      : perPiece.price}{' '}
-                    {t.egp}
-                  </Text>
-                </Group>
-              </Box>
-            )}
-          </Group>
-        </Stack>
-        {}
-        {isPieceMode && perPiece && (
-          <Group
-            justify="space-between"
-            align="center"
-            p="sm"
-            style={getNeumorphicStepperContainerStyle(isDark)}
-          >
-            <Text size="sm" fw={700} style={{ color: isDark ? '#D4BFA8' : '#5A3A28' }}>
-              {t.quantity}:
-            </Text>
-            <Group gap={8} align="center">
-              <ActionIcon
-                size="md"
-                variant="default"
-                radius="md"
-                style={getNeumorphicControlStyle(isDark)}
-                onClick={() => setPieceQty((q) => Math.max(1, q - 1))}
-                aria-label="Decrease quantity"
-              >
-                <IconMinus size={14} stroke={2.5} />
-              </ActionIcon>
-              <Text
-                size="sm"
-                fw={900}
-                style={{
-                  minWidth: 26,
-                  textAlign: 'center',
-                  color: isDark ? '#FFE066' : brandTokens.red,
-                }}
-              >
-                {pieceQty}
-              </Text>
-              <ActionIcon
-                size="md"
-                variant="default"
-                radius="md"
-                style={getNeumorphicControlStyle(isDark)}
-                onClick={() => setPieceQty((q) => q + 1)}
-                aria-label="Increase quantity"
-              >
-                <IconPlus size={14} stroke={2.5} />
-              </ActionIcon>
-              <Text
-                size="sm"
-                fw={900}
-                style={{
-                  color: isDark ? '#FFE066' : '#7A1C14',
-                  backgroundColor: isDark
-                    ? 'rgba(255, 224, 102, 0.15)'
-                    : 'rgba(140, 28, 19, 0.08)',
-                  padding: '2px 8px',
-                  borderRadius: 6,
-                  border: isDark ? 'none' : '1px solid rgba(140, 28, 19, 0.15)',
-                  boxShadow: isDark
-                    ? '0 0 6px rgba(0, 0, 0, 0.35)'
-                    : '0 0 6px rgba(130, 85, 55, 0.06), 0 0 4px rgba(255, 255, 255, 0.8)',
-                  marginLeft: 6,
-                }}
-              >
-                {t.totalAmount} {unitPrice * pieceQty} {t.egp}
-              </Text>
-            </Group>
-          </Group>
-        )}
-        <Divider color={isDark ? 'rgba(255, 255, 255, 0.04)' : `${brandTokens.gold}33`} />
-        {}
-        <Group justify="space-between" align="center" wrap="nowrap">
-          <div>
-            <Text size="xs" fw={600} style={{ color: isDark ? '#C9A880' : '#7A5235' }}>
-              {t.totalAmount}
-            </Text>
-            <Group gap={6} align="baseline">
-              <Text
-                fw={900}
-                size="xl"
-                style={{
-                  color: isOnSale
-                    ? isDark
-                      ? '#FF8787'
-                      : '#9B2018'
-                    : isDark
-                      ? '#FFE066'
-                      : '#6B1510',
-                  lineHeight: 1.1,
-                }}
-              >
-                {displayPrice} {t.egp}
-              </Text>
-              {isOnSale && originalDisplayPrice > displayPrice && (
-                <Text
-                  size="xs"
-                  fw={600}
-                  style={{
-                    color: isDark ? '#A9927D' : '#8C7260',
-                    textDecoration: 'line-through',
-                  }}
-                >
-                  {originalDisplayPrice} {t.egp}
-                </Text>
-              )}
-            </Group>
-          </div>
-          <Button
-            size="md"
-            radius="xl"
-            leftSection={
-              added ? (
-                <IconCheck size={18} stroke={2.5} />
-              ) : (
-                <IconShoppingCart size={18} stroke={2} />
-              )
-            }
-            onClick={handleAdd}
-            style={{
-              fontWeight: 800,
-              minWidth: 160,
-              backgroundColor: added ? '#2f9e44' : brandTokens.red,
-              color: '#ffffff',
-              boxShadow: added
-                ? '0 4px 14px rgba(47, 158, 68, 0.4)'
-                : '0 4px 14px rgba(140, 28, 19, 0.35)',
-              border: 'none',
-              transition: 'background-color 150ms ease, transform 100ms ease, box-shadow 150ms ease',
-            }}
-          >
-            {added ? t.addedToOrder : t.addToOrder}
-          </Button>
-        </Group>
-      </Stack>
-    </Modal>
-  );
-}
-````
-
-## File: src/components/DishCard/DishListItem.tsx
-````typescript
-import { Box, Button, Collapse, Group, Image, Stack, Text, useComputedColorScheme } from '@mantine/core';
-import { useHover } from '@mantine/hooks';
-import { IconChevronDown, IconMinus, IconPlus } from '@tabler/icons-react';
-import { useState } from 'react';
-import { useCart } from '@/context/CartContext';
-import { useLanguage } from '@/context/LanguageContext';
-import { brandTokens } from '@/theme';
-import {
-  getNeumorphicPriceTagStyle,
-  getNeumorphicChipStyle,
-  getNeumorphicControlStyle,
-  neumorphicTokens,
-} from '@/styles/neumorphic';
-import { SaleBadge } from './SaleBadge';
-import { PriceTagCapsule } from './PriceTagCapsule';
-import type { DishCardProps, DishSize, SizeLabel } from './DishCard.types';
-const ALL_SIZES: SizeLabel[] = ['S', 'M', 'L'];
-function SizeButton({
-  label,
-  size,
-  selected,
-  sale,
-  isDark,
-  onClick,
-}: {
-  label: SizeLabel;
-  size?: DishSize;
-  selected: boolean;
-  sale: boolean;
-  isDark: boolean;
-  onClick: () => void;
-}) {
-  const available = !!size;
-  const hasDiscount = Boolean(sale && size?.discountedPrice != null);
-  const displayPrice = hasDiscount ? size!.discountedPrice : size?.price;
-  return (
-    <Box
-      onClick={available ? onClick : undefined}
-      style={{
-        ...getNeumorphicChipStyle(isDark, selected),
-        padding: '4px 10px',
-        borderRadius: 6,
-        gap: 6,
-        cursor: available ? 'pointer' : 'default',
-        opacity: available ? 1 : 0.35,
-      }}
-    >
-      <Text
-        size="xs"
-        fw={900}
-        style={{ color: selected ? '#FFFFFF' : isDark ? '#E8A89E' : brandTokens.red }}
-      >
-        {label}
-      </Text>
-      {available && (
-        <Group gap={4} align="baseline" wrap="nowrap">
-          {hasDiscount && (
-            <Text
-              size="10px"
-              fw={700}
-              style={{
-                color: selected
-                  ? 'rgba(255, 255, 255, 0.75)'
-                  : isDark
-                    ? 'rgba(255, 255, 255, 0.45)'
-                    : 'rgba(107, 21, 16, 0.55)',
-                textDecoration: 'line-through',
-              }}
-            >
-              {size.price}
-            </Text>
-          )}
-          <Text
-            size="xs"
-            fw={800}
-            style={{
-              color: selected
-                ? '#FFE066'
-                : isDark
-                  ? '#FFE066'
-                  : '#7A1C14',
-              letterSpacing: '0.02em',
-            }}
-          >
-            {displayPrice} EGP
-          </Text>
-        </Group>
-      )}
-    </Box>
-  );
-}
-export function DishListItem({
-  id,
-  title,
-  title_ar,
-  description,
-  description_ar,
-  image,
-  sale,
-  sizes,
-  perPiece,
-  available = true,
-}: DishCardProps) {
-  const { hovered, ref } = useHover();
-  const { addItem } = useCart();
-  const { t, isArabic } = useLanguage();
-  const computedColorScheme = useComputedColorScheme('light', { getInitialValueInEffect: false });
-  const isDark = computedColorScheme === 'dark';
-  const safeSizes = sizes && sizes.length > 0 ? sizes : [{ label: 'S' as SizeLabel, price: 0 }];
-  const [expanded, setExpanded] = useState(false);
-  const [selectedType, setSelectedType] = useState<'size' | 'piece'>('size');
-  const [selectedSize, setSelectedSize] = useState<DishSize>(safeSizes[0]);
-  const [pieceQty, setPieceQty] = useState<number>(1);
-  const [added, setAdded] = useState(false);
-  const currentTitle = isArabic && title_ar ? title_ar : title;
-  const currentDesc = isArabic && description_ar ? description_ar : description;
-  const isPieceMode = selectedType === 'piece' && !!perPiece;
-  const minPrice = Math.min(
-    ...safeSizes.map((s) => s.discountedPrice ?? s.price),
-    perPiece ? (sale && perPiece.discountedPrice != null ? perPiece.discountedPrice : perPiece.price) : Infinity
-  );
-  const maxPrice = Math.max(...safeSizes.map((s) => s.price));
-  const isSingleSize = safeSizes.length === 1 && !perPiece;
-  const isOnSale = Boolean(sale);
-  const priceLabel = isSingleSize
-    ? `${safeSizes[0].discountedPrice ?? safeSizes[0].price} ${t.egp}`
-    : `${minPrice === Infinity ? 0 : minPrice}–${maxPrice === -Infinity ? 0 : maxPrice} ${t.egp}`;
-  const originalPriceLabel = isSingleSize && sale && safeSizes[0].discountedPrice != null
-    ? `${safeSizes[0].price} ${t.egp}`
-    : null;
-  const currentPieceTotal = (perPiece
-    ? (sale && perPiece.discountedPrice != null ? perPiece.discountedPrice : perPiece.price)
-    : 0) * pieceQty;
-  const handleAddToCart = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!available) return;
-    const unitPrice = isPieceMode
-      ? (sale && perPiece?.discountedPrice != null ? perPiece.discountedPrice : perPiece?.price ?? 0)
-      : (sale && selectedSize.discountedPrice != null ? selectedSize.discountedPrice : selectedSize.price);
-    addItem({
-      dishId: id ?? Math.floor(Math.random() * 100000),
-      title: currentTitle,
-      sizeLabel: isPieceMode ? (isArabic ? 'قطعة' : 'Pc') : selectedSize.label,
-      unitPrice,
-      quantity: isPieceMode ? pieceQty : 1,
-      image,
-    });
-    setAdded(true);
-    setTimeout(() => setAdded(false), 1200);
-  };
-  return (
-    <Box
-      ref={ref}
-      py="sm"
-      px="sm"
-      pos="relative"
-      onClick={() => available && setExpanded((v) => !v)}
-      style={{
-        cursor: available ? 'pointer' : 'not-allowed',
-        borderBottom: isDark ? 'none' : '1px solid rgba(0, 0, 0, 0.06)',
-        transition:
-          'background 180ms ease, border-radius 180ms ease, box-shadow 180ms ease, filter 150ms ease, opacity 150ms ease, transform 180ms ease',
-        transform: hovered && available && !expanded ? 'translateY(-2px)' : 'none',
-        borderRadius: expanded && available ? 12 : 8,
-        filter: available ? undefined : 'grayscale(0.85)',
-        opacity: available ? 1 : 0.55,
-        background: expanded && available
-          ? (isDark ? 'rgba(255, 255, 255, 0.06)' : '#ffffff')
-          : hovered && available
-            ? (isDark ? 'rgba(255, 255, 255, 0.03)' : 'rgba(255, 255, 255, 0.75)')
-            : 'transparent',
-        boxShadow: expanded && available
-          ? (isDark ? '0 0 24px rgba(0,0,0,0.5)' : '0 0 20px rgba(130, 85, 55, 0.12), 0 0 8px rgba(255, 255, 255, 0.8)')
-          : hovered && available
-            ? (isDark ? '0 0 16px rgba(0,0,0,0.35)' : '0 0 14px rgba(130, 85, 55, 0.08), 0 0 6px rgba(255, 255, 255, 0.6)')
-            : undefined,
-      }}
-    >
-      {}
-      {!available && (
-        <Box
-          pos="absolute"
-          top={0}
-          left={0}
-          right={0}
-          bottom={0}
-          style={{
-            zIndex: 2,
-            backgroundColor: 'rgba(28, 20, 16, 0.15)',
-            borderRadius: 'inherit',
-            pointerEvents: 'none',
-          }}
-        />
-      )}
-      {}
-      <Group justify="space-between" wrap="nowrap" gap="xs">
-        <Group gap="xs" wrap="nowrap" style={{ flex: 1, minWidth: 0 }}>
-          <Text
-            fw={700}
-            size="sm"
-            style={{
-              whiteSpace: 'nowrap',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              textDecoration: !available ? 'line-through' : undefined,
-              color: isDark ? '#FFF9F0' : '#2A170A',
-              flexShrink: 1,
-              minWidth: 0,
-            }}
-          >
-            {currentTitle}
-          </Text>
-          {available && isOnSale && <SaleBadge />}
-          {!available && (
-            <SaleBadge variant="dark" size="xs">
-              {t.unavailable}
-            </SaleBadge>
-          )}
-        </Group>
-        {}
-        <Group gap={8} wrap="nowrap" align="center" style={{ flexShrink: 0 }}>
-          <PriceTagCapsule
-            isDark={isDark}
-            isOnSale={isOnSale}
-            available={available}
-            displayPrice={priceLabel}
-            originalPrice={originalPriceLabel}
-            currencySuffix=""
-          />
-          {available && (
-            <IconChevronDown
-              size={18}
-              stroke={2.2}
-              style={{
-                transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)',
-                transition: 'transform 200ms ease, color 150ms ease',
-                color: expanded
-                  ? (isDark ? '#FFE066' : brandTokens.red)
-                  : (isDark ? '#D4BFA8' : '#5A3A28'),
-                flexShrink: 0,
-              }}
-            />
-          )}
-        </Group>
-      </Group>
-      {/* Expandable details */}
-      <Collapse in={expanded}>
-        <Stack gap="sm" mt="sm" onClick={(e) => e.stopPropagation()}>
-          <Group gap="sm" align="flex-start" wrap="nowrap">
-            <Image
-              src={image}
-              alt={currentTitle}
-              w={104}
-              h={76}
-              radius="md"
-              style={{
-                objectFit: 'cover',
-                flexShrink: 0,
-                border: isDark ? 'none' : '1px solid rgba(0, 0, 0, 0.08)',
-                boxShadow: isDark
-                  ? '0 0 14px rgba(0,0,0,0.6)'
-                  : '0 0 10px rgba(130, 85, 55, 0.1), 0 0 4px rgba(255, 255, 255, 0.8)',
-              }}
-            />
-            <Stack gap={4} style={{ flex: 1, minWidth: 0 }}>
-              {available && isOnSale && (
-                <Box mb={2}>
-                  <SaleBadge />
-                </Box>
-              )}
-              <Text
-                size="xs"
-                style={{
-                  color: isDark ? '#FDF2F0' : '#2A170A',
-                  fontWeight: 500,
-                  lineHeight: 1.6,
-                }}
-              >
-                {currentDesc}
-              </Text>
-            </Stack>
-          </Group>
-          {}
-          <Group gap={6} wrap="wrap">
-            {ALL_SIZES.map((label) => {
-              const sizeObj = sizes.find((s) => s.label === label);
-              return (
-                <SizeButton
-                  key={label}
-                  label={label}
-                  size={sizeObj}
-                  selected={selectedType === 'size' && selectedSize.label === label}
-                  sale={sale}
-                  isDark={isDark}
-                  onClick={() => {
-                    if (sizeObj) {
-                      setSelectedSize(sizeObj);
-                      setSelectedType('size');
-                    }
-                  }}
-                />
-              );
-            })}
-            {perPiece && (
-              <Box
-                onClick={() => setSelectedType('piece')}
-                style={{
-                  ...getNeumorphicChipStyle(isDark, selectedType === 'piece'),
-                  padding: '4px 10px',
-                  borderRadius: 6,
-                  gap: 6,
-                }}
-              >
-                <Text
-                  size="xs"
-                  fw={900}
-                  style={{ color: selectedType === 'piece' ? '#FFFFFF' : isDark ? '#E8A89E' : brandTokens.red }}
-                >
-                  {t.perPieceLabel}
-                </Text>
-                <Group gap={4} align="baseline" wrap="nowrap">
-                  {sale && perPiece.discountedPrice != null && (
-                    <Text
-                      size="10px"
-                      fw={700}
-                      style={{
-                        color: selectedType === 'piece'
-                          ? 'rgba(255, 255, 255, 0.75)'
-                          : isDark
-                            ? 'rgba(255, 255, 255, 0.45)'
-                            : 'rgba(140, 28, 19, 0.55)',
-                        textDecoration: 'line-through',
-                      }}
-                    >
-                      {perPiece.price}
-                    </Text>
-                  )}
-                  <Text
-                    size="xs"
-                    fw={800}
-                    style={{
-                      color: selectedType === 'piece'
-                        ? '#FFE066'
-                        : isDark
-                          ? '#FFE066'
-                          : '#7A1C14',
-                      letterSpacing: '0.02em',
-                    }}
-                  >
-                    {perPiece.discountedPrice != null && sale ? perPiece.discountedPrice : perPiece.price} {t.egp}
-                  </Text>
-                </Group>
-              </Box>
-            )}
-          </Group>
-          {}
-          {isPieceMode && perPiece && (
-            <Group gap="sm" align="center" pt={2}>
-              <Text size="xs" fw={600} style={{ color: isDark ? '#D4BFA8' : '#5A3A28' }}>
-                {t.quantity}:
-              </Text>
-              <Group gap={6} align="center">
-                <Box
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setPieceQty((q) => Math.max(1, q - 1));
-                  }}
-                  style={{
-                    ...getNeumorphicControlStyle(isDark),
-                    width: 24,
-                    height: 24,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    borderRadius: 6,
-                    cursor: pieceQty > 1 ? 'pointer' : 'default',
-                    userSelect: 'none',
-                    opacity: pieceQty > 1 ? 1 : 0.35,
-                  }}
-                >
-                  <IconMinus size={12} stroke={2.5} />
-                </Box>
-                <Text size="xs" fw={800} style={{ minWidth: 20, textAlign: 'center', color: isDark ? '#FFE066' : brandTokens.red }}>
-                  {pieceQty}
-                </Text>
-                <Box
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setPieceQty((q) => q + 1);
-                  }}
-                  style={{
-                    ...getNeumorphicControlStyle(isDark),
-                    width: 24,
-                    height: 24,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    borderRadius: 6,
-                    cursor: 'pointer',
-                    userSelect: 'none',
-                  }}
-                >
-                  <IconPlus size={12} stroke={2.5} />
-                </Box>
-                <Text
-                  size="xs"
-                  fw={900}
-                  style={{
-                    color: isDark ? '#FFE066' : '#7A1C14',
-                    backgroundColor: isDark ? 'rgba(255, 224, 102, 0.15)' : 'rgba(140, 28, 19, 0.08)',
-                    padding: '2px 8px',
-                    borderRadius: 6,
-                    border: isDark ? 'none' : '1px solid rgba(140, 28, 19, 0.15)',
-                    boxShadow: isDark
-                      ? '0 0 6px rgba(0, 0, 0, 0.35)'
-                      : '0 0 6px rgba(130, 85, 55, 0.06), 0 0 4px rgba(255, 255, 255, 0.8)',
-                    marginLeft: 6,
-                  }}
-                >
-                  {t.totalAmount} {currentPieceTotal} {t.egp}
-                </Text>
-              </Group>
-            </Group>
-          )}
-          {}
-          {available && (
-            <Group justify="flex-end" pt={4}>
-              <Button
-                size="xs"
-                radius="md"
-                onClick={handleAddToCart}
-                style={{
-                  fontWeight: 800,
-                  transition: 'background-color 150ms ease, border-color 150ms ease, color 150ms ease',
-                  backgroundColor: added ? '#2f9e44' : brandTokens.red,
-                  color: '#FFFFFF',
-                  boxShadow: added
-                    ? '0 2px 8px rgba(47, 158, 68, 0.3)'
-                    : '0 2px 8px rgba(140, 28, 19, 0.3)',
-                }}
-              >
-                {added ? t.addedToOrder : t.addToOrder}
-              </Button>
-            </Group>
-          )}
-        </Stack>
-      </Collapse>
-    </Box>
-  );
 }
 ````
 
@@ -3415,58 +2378,6 @@ export { TopBar } from './TopBar';
 export { AdminTopBar } from './AdminTopBar';
 ````
 
-## File: src/components/TopBar/TopBar.test.tsx
-````typescript
-import { render, screen, fireEvent } from '@testing-library/react';
-import { describe, it, expect, beforeEach } from 'vitest';
-import { MantineProvider } from '@mantine/core';
-import { MemoryRouter } from 'react-router-dom';
-import { TopBar } from './TopBar';
-import { CartProvider } from '@/context/CartContext';
-import { LanguageProvider } from '@/context/LanguageContext';
-import { theme } from '@/theme';
-describe('TopBar Theme Toggle', () => {
-  beforeEach(() => {
-    const store: Record<string, string> = {};
-    Object.defineProperty(window, 'localStorage', {
-      value: {
-        getItem: (k: string) => store[k] ?? null,
-        setItem: (k: string, v: string) => {
-          store[k] = v;
-        },
-        removeItem: (k: string) => {
-          delete store[k];
-        },
-        clear: () => {
-          for (const k in store) delete store[k];
-        },
-      },
-      writable: true,
-    });
-  });
-  it('toggles color scheme attribute and icon seamlessly', () => {
-    render(
-      <MantineProvider theme={theme} defaultColorScheme="light">
-        <LanguageProvider>
-          <CartProvider>
-            <MemoryRouter>
-              <TopBar />
-            </MemoryRouter>
-          </CartProvider>
-        </LanguageProvider>
-      </MantineProvider>
-    );
-    const toggleButton = screen.getByRole('button', { name: /Toggle color scheme|تبديل المظهر/i });
-    expect(toggleButton).toBeDefined();
-    expect(document.documentElement.getAttribute('data-mantine-color-scheme')).toBe('light');
-    fireEvent.click(toggleButton);
-    expect(document.documentElement.getAttribute('data-mantine-color-scheme')).toBe('dark');
-    fireEvent.click(toggleButton);
-    expect(document.documentElement.getAttribute('data-mantine-color-scheme')).toBe('light');
-  });
-});
-````
-
 ## File: src/components/TopBar/TopBar.tsx
 ````typescript
 import {
@@ -3587,254 +2498,6 @@ export function TopBar() {
 }
 ````
 
-## File: src/context/CartContext.tsx
-````typescript
-import React, { createContext, useContext, useEffect, useState } from 'react';
-export interface CartItem {
-  id: string;
-  dishId: number;
-  title: string;
-  sizeLabel: string;
-  unitPrice: number;
-  quantity: number;
-  image: string;
-}
-export type OrderType = 'delivery' | 'takeout';
-export interface SupplementaryPreferences {
-  cutlery: boolean;
-  spiceLevel: 'regular' | 'extra' | 'mild';
-  servingStyle?: 'separate' | 'mixed';
-}
-export interface CustomerDetails {
-  name: string;
-  phone: string;
-  address: string;
-  notes: string;
-  orderType: OrderType;
-  preferences?: SupplementaryPreferences;
-}
-interface CartContextType {
-  items: CartItem[];
-  isOpen: boolean;
-  openCart: () => void;
-  closeCart: () => void;
-  toggleCart: () => void;
-  addItem: (item: Omit<CartItem, 'id'>) => void;
-  updateQuantity: (id: string, delta: number) => void;
-  removeItem: (id: string) => void;
-  clearCart: () => void;
-  totalCount: number;
-  totalPrice: number;
-  checkoutWhatsApp: (customer: CustomerDetails) => void;
-}
-const CartContext = createContext<CartContextType | undefined>(undefined);
-const CART_STORAGE_KEY = 'mama-kitchen-cart';
-const WHATSAPP_PHONE = '201554487523';
-export function CartProvider({ children }: { children: React.ReactNode }) {
-  const [items, setItems] = useState<CartItem[]>(() => {
-    try {
-      const saved = localStorage.getItem(CART_STORAGE_KEY);
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
-  const [isOpen, setIsOpen] = useState(false);
-  useEffect(() => {
-    try {
-      localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(items));
-    } catch (e) {
-      console.error('Failed to save cart to localStorage', e);
-    }
-  }, [items]);
-  const openCart = () => setIsOpen(true);
-  const closeCart = () => setIsOpen(false);
-  const toggleCart = () => setIsOpen((prev) => !prev);
-  const addItem = (newItem: Omit<CartItem, 'id'>) => {
-    const id = `${newItem.dishId}-${newItem.sizeLabel}`;
-    setItems((prev) => {
-      const existing = prev.find((i) => i.id === id);
-      if (existing) {
-        return prev.map((i) =>
-          i.id === id ? { ...i, quantity: i.quantity + newItem.quantity } : i
-        );
-      }
-      return [...prev, { ...newItem, id }];
-    });
-  };
-  const updateQuantity = (id: string, delta: number) => {
-    setItems((prev) =>
-      prev
-        .map((item) => {
-          if (item.id === id) {
-            const newQty = item.quantity + delta;
-            return newQty > 0 ? { ...item, quantity: newQty } : null;
-          }
-          return item;
-        })
-        .filter((item): item is CartItem => item !== null)
-    );
-  };
-  const removeItem = (id: string) => {
-    setItems((prev) => prev.filter((item) => item.id !== id));
-  };
-  const clearCart = () => {
-    setItems([]);
-  };
-  const totalCount = items.reduce((sum, item) => sum + item.quantity, 0);
-  const totalPrice = items.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
-  const checkoutWhatsApp = (customer: CustomerDetails) => {
-    if (items.length === 0) return;
-    const lines: string[] = [
-      '🍽️ *طلب جديد من Mama Kitchen - مطبخ مامي*',
-      '━━━━━━━━━━━━━━━━━━━━',
-    ];
-    const orderTypeLabel = customer.orderType === 'takeout' ? '🏃 *استلام من المطعم (Takeout)*' : '🛵 *توصيل للمنزل (Delivery)*';
-    lines.push(orderTypeLabel);
-    items.forEach((item, index) => {
-      const sizeDisplay = item.sizeLabel === 'Pc' ? 'قطعة' : `حجم ${item.sizeLabel}`;
-      lines.push(
-        `${index + 1}. *${item.title}* (${sizeDisplay})` +
-        `\n   • الكمية: ${item.quantity} × ${item.unitPrice} ج.م = *${item.quantity * item.unitPrice} ج.م*`
-      );
-    });
-    lines.push('━━━━━━━━━━━━━━━━━━━━');
-    lines.push(`💰 *الإجمالي الكلي:* ${totalPrice} ج.م`);
-    lines.push('━━━━━━━━━━━━━━━━━━━━');
-    if (customer.name.trim()) {
-      lines.push(`👤 *الاسم:* ${customer.name.trim()}`);
-    }
-    if (customer.phone.trim()) {
-      lines.push(`📞 *رقم الهاتف:* ${customer.phone.trim()}`);
-    }
-    if (customer.address.trim()) {
-      lines.push(`📍 *العنوان:* ${customer.address.trim()}`);
-    } else if (customer.orderType === 'delivery') {
-      lines.push(`📍 *العنوان:* (لم يُدخل — سيتم التواصل لتحديده)`);
-    }
-    if (customer.preferences) {
-      const spiceMap: Record<string, string> = {
-        regular: 'شطة عادية',
-        extra: 'حارة زيادة 🔥',
-        mild: 'بدون شطة (بارد)',
-      };
-      const servingMap: Record<string, string> = {
-        separate: 'الملاح في علب منفصلة',
-        mixed: 'مفرود فوق الكسرة / القراصة',
-      };
-      lines.push('⚙️ *خيارات وتفضيلات إضافية:*');
-      lines.push(`   • مستوى الشطة: ${spiceMap[customer.preferences.spiceLevel] || 'عادية'}`);
-      if (customer.preferences.servingStyle) {
-        lines.push(`   • طريقة التقديم: ${servingMap[customer.preferences.servingStyle]}`);
-      }
-      lines.push(
-        `   • أدوات المائدة: ${customer.preferences.cutlery ? 'نعم (ملاعق ومناديل)' : 'لا داعي (صديق للبيئة 🌱)'}`
-      );
-    }
-    if (customer.notes.trim()) {
-      lines.push(`📝 *ملاحظات إضافية:* ${customer.notes.trim()}`);
-    }
-    lines.push('\nشكراً لكم! أرجو تأكيد الطلب وسعر التوصيل 🙏');
-    const message = encodeURIComponent(lines.join('\n'));
-    const url = `https://wa.me/${WHATSAPP_PHONE}?text=${message}`;
-    window.open(url, '_blank', 'noopener,noreferrer');
-  };
-  return (
-    <CartContext.Provider
-      value={{
-        items,
-        isOpen,
-        openCart,
-        closeCart,
-        toggleCart,
-        addItem,
-        updateQuantity,
-        removeItem,
-        clearCart,
-        totalCount,
-        totalPrice,
-        checkoutWhatsApp,
-      }}
-    >
-      {children}
-    </CartContext.Provider>
-  );
-}
-export function useCart() {
-  const context = useContext(CartContext);
-  if (!context) {
-    throw new Error('useCart must be used within a CartProvider');
-  }
-  return context;
-}
-````
-
-## File: src/context/LanguageContext.tsx
-````typescript
-import React, { createContext, useContext, useEffect, useState } from 'react';
-import { translations, type Language, type TranslationDictionary } from '@/locales';
-export type { Language, TranslationDictionary };
-export { translations };
-export type Translations = TranslationDictionary;
-interface LanguageContextType {
-  language: Language;
-  direction: 'rtl' | 'ltr';
-  isArabic: boolean;
-  t: TranslationDictionary;
-  toggleLanguage: () => void;
-  setLanguage: (lang: Language) => void;
-}
-const LanguageContext = createContext<LanguageContextType | undefined>(undefined);
-const LANG_STORAGE_KEY = 'mama-kitchen-lang';
-export function LanguageProvider({ children }: { children: React.ReactNode }) {
-  const [language, setLanguageState] = useState<Language>(() => {
-    try {
-      const saved = localStorage.getItem(LANG_STORAGE_KEY);
-      if (saved === 'ar' || saved === 'en') return saved;
-      return 'ar';
-    } catch {
-      return 'ar';
-    }
-  });
-  const direction = language === 'ar' ? 'rtl' : 'ltr';
-  useEffect(() => {
-    try {
-      localStorage.setItem(LANG_STORAGE_KEY, language);
-    } catch (e) {
-      console.error('Failed to save language', e);
-    }
-    document.documentElement.dir = direction;
-    document.documentElement.lang = language;
-  }, [language, direction]);
-  const toggleLanguage = () => {
-    setLanguageState((prev) => (prev === 'ar' ? 'en' : 'ar'));
-  };
-  const setLanguage = (lang: Language) => {
-    setLanguageState(lang);
-  };
-  const value: LanguageContextType = {
-    language,
-    direction,
-    isArabic: language === 'ar',
-    t: translations[language],
-    toggleLanguage,
-    setLanguage,
-  };
-  return (
-    <LanguageContext.Provider value={value}>
-      {children}
-    </LanguageContext.Provider>
-  );
-}
-export function useLanguage() {
-  const context = useContext(LanguageContext);
-  if (!context) {
-    throw new Error('useLanguage must be used within a LanguageProvider');
-  }
-  return context;
-}
-````
-
 ## File: src/context/MenuContext.test.tsx
 ````typescript
 import { describe, it, expect } from 'vitest';
@@ -3912,221 +2575,6 @@ describe('generateSecureDishId', () => {
     expect(ids.size).toBe(50);
   });
 });
-````
-
-## File: src/context/MenuContext.tsx
-````typescript
-import React, { createContext, useContext, useEffect, useState } from 'react';
-import { API_ENDPOINTS, type ApiEndpoints } from '@/api/endpoints';
-import initialDishes from '@/data/dishes.json';
-import type { DishCardProps, DishSize, SizeLabel } from '@/components/DishCard';
-export interface DishItem extends DishCardProps {
-  id: number;
-  category: string;
-}
-export function generateSecureDishId(existingIds: number[] = []): number {
-  const existingSet = new Set(existingIds);
-  const buffer = new Uint32Array(1);
-  let id = 0;
-  do {
-    if (typeof window !== 'undefined' && window.crypto?.getRandomValues) {
-      window.crypto.getRandomValues(buffer);
-      id = 10000000 + (buffer[0] % 90000000);
-    } else {
-      id = Math.floor(10000000 + Math.random() * 90000000);
-    }
-  } while (existingSet.has(id));
-  return id;
-}
-export function compileDishesToJson(dishes: DishItem[]): string {
-  const cleanList = dishes.map((dish) => {
-    const item: Record<string, any> = {
-      id: dish.id,
-      title: dish.title.trim(),
-    };
-    if (dish.title_ar && dish.title_ar.trim()) {
-      item.title_ar = dish.title_ar.trim();
-    }
-    item.description = (dish.description || '').trim();
-    if (dish.description_ar && dish.description_ar.trim()) {
-      item.description_ar = dish.description_ar.trim();
-    }
-    item.image = dish.image || 'maincourse';
-    item.category = dish.category || 'main';
-    item.sale = Boolean(dish.sale);
-    if (dish.available === false) {
-      item.available = false;
-    }
-    item.sizes = (dish.sizes || []).map((s) => {
-      const sizeObj: Record<string, any> = {
-        label: s.label,
-        price: Number(s.price),
-      };
-      if (dish.sale && s.discountedPrice != null && Number(s.discountedPrice) > 0) {
-        sizeObj.discountedPrice = Number(s.discountedPrice);
-      }
-      return sizeObj;
-    });
-    if (dish.perPiece && Number(dish.perPiece.price) > 0) {
-      const pieceObj: Record<string, any> = {
-        price: Number(dish.perPiece.price),
-      };
-      if (dish.sale && dish.perPiece.discountedPrice != null && Number(dish.perPiece.discountedPrice) > 0) {
-        pieceObj.discountedPrice = Number(dish.perPiece.discountedPrice);
-      }
-      item.perPiece = pieceObj;
-    }
-    return item;
-  });
-  return JSON.stringify(cleanList, null, 2);
-}
-interface MenuContextType {
-  dishes: DishItem[];
-  endpoints: ApiEndpoints;
-  toggleAvailability: (id: number) => void;
-  toggleSale: (id: number) => void;
-  updateDish: (id: number, updated: Partial<DishItem>) => void;
-  addDish: (newDish: Omit<DishItem, 'id'> & { id?: number }) => number;
-  deleteDish: (id: number) => void;
-  duplicateDish: (id: number) => number;
-  generateSecureId: () => number;
-  resetMenu: () => void;
-  compileServerJson: () => string;
-}
-const MenuContext = createContext<MenuContextType | undefined>(undefined);
-const MENU_STORAGE_KEY = 'mama-kitchen-menu-state-v1';
-export function MenuProvider({ children }: { children: React.ReactNode }) {
-  const [dishes, setDishes] = useState<DishItem[]>(() => {
-    try {
-      const saved = localStorage.getItem(MENU_STORAGE_KEY);
-      if (saved) {
-        return JSON.parse(saved);
-      }
-    } catch (e) {
-      console.error('Failed to load menu overrides', e);
-    }
-    return initialDishes as unknown as DishItem[];
-  });
-  useEffect(() => {
-    try {
-      localStorage.setItem(MENU_STORAGE_KEY, JSON.stringify(dishes));
-    } catch (e) {
-      console.error('Failed to save menu state', e);
-    }
-  }, [dishes]);
-  useEffect(() => {
-    let cancelled = false;
-    fetch(API_ENDPOINTS.PUBLIC_MENU)
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data: { dishes?: DishItem[] } | null) => {
-        if (!cancelled && data?.dishes && Array.isArray(data.dishes) && data.dishes.length > 0) {
-          setDishes(data.dishes);
-        }
-      })
-      .catch(() => {
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-  const syncRequest = (method: 'POST' | 'PATCH' | 'DELETE', body?: unknown, query = '') => {
-    fetch(`${API_ENDPOINTS.PUBLIC_MENU}${query}`, {
-      method,
-      headers: body ? { 'Content-Type': 'application/json' } : undefined,
-      body: body ? JSON.stringify(body) : undefined,
-      credentials: 'same-origin',
-    }).catch((err) => console.error('Failed to sync menu change:', err));
-  };
-  const toggleAvailability = (id: number) => {
-    const target = dishes.find((d) => d.id === id);
-    const nextAvailable = target?.available === false ? true : false;
-    setDishes((prev) =>
-      prev.map((dish) => (dish.id === id ? { ...dish, available: nextAvailable } : dish))
-    );
-    syncRequest('PATCH', { id, updated: { available: nextAvailable } });
-  };
-  const toggleSale = (id: number) => {
-    const target = dishes.find((d) => d.id === id);
-    const nextSale = !target?.sale;
-    setDishes((prev) =>
-      prev.map((dish) => (dish.id === id ? { ...dish, sale: nextSale } : dish))
-    );
-    syncRequest('PATCH', { id, updated: { sale: nextSale } });
-  };
-  const updateDish = (id: number, updated: Partial<DishItem>) => {
-    setDishes((prev) =>
-      prev.map((dish) => (dish.id === id ? { ...dish, ...updated } : dish))
-    );
-    syncRequest('PATCH', { id, updated });
-  };
-  const addDish = (newDish: Omit<DishItem, 'id'> & { id?: number }): number => {
-    const id = newDish.id ?? generateSecureDishId(dishes.map((d) => d.id));
-    const dishWithId: DishItem = {
-      ...newDish,
-      id,
-    };
-    setDishes((prev) => [dishWithId, ...prev]);
-    syncRequest('POST', { dish: dishWithId });
-    return id;
-  };
-  const deleteDish = (id: number) => {
-    setDishes((prev) => prev.filter((d) => d.id !== id));
-    syncRequest('DELETE', undefined, `?id=${id}`);
-  };
-  const duplicateDish = (id: number): number => {
-    const target = dishes.find((d) => d.id === id);
-    if (!target) return -1;
-    const nextId = generateSecureDishId(dishes.map((d) => d.id));
-    let newImage = target.image;
-    if (target.image && (target.image.startsWith(`${target.id}.`) || target.image === String(target.id))) {
-      const ext = target.image.includes('.') ? target.image.split('.').pop() : 'jpg';
-      newImage = `${nextId}.${ext}`;
-    }
-    const cloned: DishItem = {
-      ...target,
-      id: nextId,
-      image: newImage,
-      title: `${target.title} (Copy)`,
-      title_ar: target.title_ar ? `${target.title_ar} (نسخة)` : undefined,
-    };
-    setDishes((prev) => [cloned, ...prev]);
-    syncRequest('POST', { dish: cloned });
-    return nextId;
-  };
-  const generateSecureId = () => generateSecureDishId(dishes.map((d) => d.id));
-  const resetMenu = () => {
-    setDishes(initialDishes as unknown as DishItem[]);
-    localStorage.removeItem(MENU_STORAGE_KEY);
-    syncRequest('DELETE', undefined, '?reset=true');
-  };
-  const compileServerJson = () => compileDishesToJson(dishes);
-  return (
-    <MenuContext.Provider
-      value={{
-        dishes,
-        endpoints: API_ENDPOINTS,
-        toggleAvailability,
-        toggleSale,
-        updateDish,
-        addDish,
-        deleteDish,
-        duplicateDish,
-        generateSecureId,
-        resetMenu,
-        compileServerJson,
-      }}
-    >
-      {children}
-    </MenuContext.Provider>
-  );
-}
-export function useMenu() {
-  const context = useContext(MenuContext);
-  if (!context) {
-    throw new Error('useMenu must be used within a MenuProvider');
-  }
-  return context;
-}
 ````
 
 ## File: src/data/dishes.json
@@ -5870,487 +4318,6 @@ export function DashboardStats({
 }
 ````
 
-## File: src/pages/Dashboard/Dashboard.page.tsx
-````typescript
-import React, { useState } from 'react';
-import {
-  IconCheck,
-  IconCode,
-  IconCopy,
-  IconDownload,
-  IconPlus,
-  IconToolsKitchen2,
-} from '@tabler/icons-react';
-import {
-  Badge,
-  Button,
-  Group,
-  Paper,
-  SegmentedControl,
-  SimpleGrid,
-  Stack,
-  Text,
-  TextInput,
-  Title,
-  useComputedColorScheme,
-} from '@mantine/core';
-import type { DishSize, SizeLabel } from '@/components/DishCard';
-import { useLanguage } from '@/context/LanguageContext';
-import { useMenu, type DishItem } from '@/context/MenuContext';
-import { brandTokens } from '@/styles/neumorphic';
-import { DEFAULT_FORM, type DishFormData } from './dashboard.types';
-import { DashboardDishCard } from './components/DashboardDishCard';
-import { DashboardDishModal } from './components/DashboardDishModal';
-import { DashboardJsonDrawer } from './components/DashboardJsonDrawer';
-import { DashboardStats } from './components/DashboardStats';
-export function DashboardPage() {
-  const { t, isArabic } = useLanguage();
-  const {
-    dishes,
-    endpoints,
-    toggleAvailability,
-    updateDish,
-    addDish,
-    deleteDish,
-    duplicateDish,
-    generateSecureId,
-    resetMenu,
-    compileServerJson,
-  } = useMenu();
-  const computedColorScheme = useComputedColorScheme('light', { getInitialValueInEffect: false });
-  const isDark = computedColorScheme === 'dark';
-  const [search, setSearch] = useState('');
-  const [categoryFilter, setCategoryFilter] = useState('all');
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [showJsonPreview, setShowJsonPreview] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const [modalOpen, setModalOpen] = useState(false);
-  const [editingDishId, setEditingDishId] = useState<number | null>(null);
-  const [formData, setFormData] = useState<DishFormData>(DEFAULT_FORM);
-  const compiledJson = compileServerJson();
-  const handleCopyJson = () => {
-    navigator.clipboard.writeText(compiledJson);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-  const handleDownloadJson = () => {
-    const blob = new Blob([compiledJson], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'dishes.json';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-  };
-  const handleOpenAdd = () => {
-    setEditingDishId(null);
-    const newId = generateSecureId();
-    setFormData({
-      ...DEFAULT_FORM,
-      id: newId,
-      image: `${newId}.jpg`,
-      imageExtension: 'jpg',
-    });
-    setModalOpen(true);
-  };
-  const handleOpenEdit = (dish: DishItem) => {
-    setEditingDishId(dish.id);
-    const sObj = (dish.sizes || []).find((s) => s.label === 'S');
-    const mObj = (dish.sizes || []).find((s) => s.label === 'M');
-    const lObj = (dish.sizes || []).find((s) => s.label === 'L');
-    let ext = 'jpg';
-    if (dish.image && dish.image.includes('.')) {
-      ext = dish.image.split('.').pop() || 'jpg';
-    }
-    setFormData({
-      id: dish.id,
-      title: dish.title,
-      title_ar: dish.title_ar || '',
-      description: dish.description,
-      description_ar: dish.description_ar || '',
-      category: dish.category || 'main',
-      image: dish.image || 'maincourse',
-      uploadedDataUrl: dish.uploadedDataUrl,
-      imageExtension: ext,
-      sale: Boolean(dish.sale),
-      available: dish.available !== false,
-      sizes: {
-        S: {
-          enabled: !!sObj,
-          price: sObj ? sObj.price : 150,
-          discountedPrice: sObj?.discountedPrice,
-        },
-        M: {
-          enabled: !!mObj,
-          price: mObj ? mObj.price : 220,
-          discountedPrice: mObj?.discountedPrice,
-        },
-        L: {
-          enabled: !!lObj,
-          price: lObj ? lObj.price : 320,
-          discountedPrice: lObj?.discountedPrice,
-        },
-      },
-      hasPerPiece: !!dish.perPiece,
-      perPiecePrice: dish.perPiece ? dish.perPiece.price : 35,
-      perPieceDiscounted: dish.perPiece?.discountedPrice,
-    });
-    setModalOpen(true);
-  };
-  const handleRandomizeId = () => {
-    const newId = generateSecureId();
-    setFormData((prev) => {
-      let newImage = prev.image;
-      if (
-        prev.uploadedDataUrl ||
-        (prev.image && (prev.image.includes('.') || prev.image === String(prev.id)))
-      ) {
-        const ext =
-          prev.imageExtension || (prev.image.includes('.') ? prev.image.split('.').pop() : 'jpg');
-        newImage = `${newId}.${ext}`;
-      }
-      return {
-        ...prev,
-        id: newId,
-        image: newImage,
-      };
-    });
-  };
-  const handleImageUpload = (file: File | null) => {
-    if (!file) return;
-    const parts = file.name.split('.');
-    const ext = parts.length > 1 ? parts.pop()!.toLowerCase() : 'jpg';
-    const currentId = formData.id ?? generateSecureId();
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = reader.result as string;
-      setFormData((prev) => ({
-        ...prev,
-        id: currentId,
-        image: `${currentId}.${ext}`,
-        uploadedDataUrl: dataUrl,
-        imageExtension: ext,
-      }));
-    };
-    reader.readAsDataURL(file);
-  };
-  const handleRemoveImage = () => {
-    setFormData((prev) => ({
-      ...prev,
-      image: 'maincourse',
-      uploadedDataUrl: undefined,
-    }));
-  };
-  const handleDownloadPicture = () => {
-    if (!formData.uploadedDataUrl) return;
-    const filename = formData.image || `${formData.id || 'dish'}.jpg`;
-    const a = document.createElement('a');
-    a.href = formData.uploadedDataUrl;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-  };
-  const sizeErrors: Partial<Record<SizeLabel, string>> = {};
-  if (formData.sale) {
-    (['S', 'M', 'L'] as SizeLabel[]).forEach((lbl) => {
-      const cfg = formData.sizes[lbl];
-      if (
-        cfg?.enabled &&
-        cfg.discountedPrice != null &&
-        Number(cfg.discountedPrice) >= Number(cfg.price)
-      ) {
-        sizeErrors[lbl] = `${t.discountPriceError} (< ${cfg.price} ${t.egp})`;
-      }
-    });
-  }
-  const perPieceError =
-    formData.sale &&
-    formData.hasPerPiece &&
-    formData.perPieceDiscounted != null &&
-    Number(formData.perPieceDiscounted) >= Number(formData.perPiecePrice)
-      ? `${t.discountPriceError} (< ${formData.perPiecePrice} ${t.egp})`
-      : undefined;
-  const hasPriceErrors = Object.keys(sizeErrors).length > 0 || !!perPieceError;
-  const handleSaveDish = () => {
-    if (!formData.title.trim() || hasPriceErrors) return;
-    const sizes: DishSize[] = [];
-    (['S', 'M', 'L'] as SizeLabel[]).forEach((lbl) => {
-      const cfg = formData.sizes[lbl];
-      if (cfg?.enabled) {
-        sizes.push({
-          label: lbl,
-          price: Number(cfg.price) || 0,
-          discountedPrice:
-            formData.sale && cfg.discountedPrice != null ? Number(cfg.discountedPrice) : undefined,
-        });
-      }
-    });
-    if (sizes.length === 0) {
-      sizes.push({ label: 'S', price: 100 });
-    }
-    const finalId = formData.id ?? generateSecureId();
-    const dishPayload: DishItem = {
-      id: finalId,
-      title: formData.title.trim(),
-      title_ar: formData.title_ar.trim() || undefined,
-      description: formData.description.trim(),
-      description_ar: formData.description_ar.trim() || undefined,
-      category: formData.category,
-      image: formData.image || 'maincourse',
-      uploadedDataUrl: formData.uploadedDataUrl,
-      sale: formData.sale,
-      available: formData.available,
-      sizes,
-      perPiece: formData.hasPerPiece
-        ? {
-            price: Number(formData.perPiecePrice) || 0,
-            discountedPrice:
-              formData.sale && formData.perPieceDiscounted != null
-                ? Number(formData.perPieceDiscounted)
-                : undefined,
-          }
-        : undefined,
-    };
-    if (editingDishId != null) {
-      updateDish(editingDishId, dishPayload);
-    } else {
-      addDish(dishPayload);
-    }
-    setModalOpen(false);
-  };
-  const filteredDishes = dishes.filter((dish) => {
-    const matchesSearch =
-      dish.title.toLowerCase().includes(search.toLowerCase()) ||
-      (dish.title_ar && dish.title_ar.includes(search)) ||
-      String(dish.id).includes(search);
-    const matchesCategory = categoryFilter === 'all' || dish.category === categoryFilter;
-    let matchesStatus = true;
-    if (statusFilter === 'available') matchesStatus = dish.available !== false;
-    if (statusFilter === 'unavailable') matchesStatus = dish.available === false;
-    if (statusFilter === 'sale') matchesStatus = Boolean(dish.sale);
-    return matchesSearch && matchesCategory && matchesStatus;
-  });
-  const onSaleCount = dishes.filter((d) => d.sale).length;
-  const outOfStockCount = dishes.filter((d) => d.available === false).length;
-  return (
-    <Stack gap="xl" p="xl" maw={1200} mx="auto" w="100%">
-      {}
-      <Group justify="space-between" align="flex-start" wrap="wrap" gap="md">
-        <div>
-          <Group gap="xs" align="center">
-            <Title order={2} style={{ color: isDark ? '#E8A89E' : brandTokens.red }}>
-              <Group gap={8} align="center" style={{ display: 'inline-flex' }}>
-                <IconToolsKitchen2 size={26} stroke={1.8} style={{ flexShrink: 0 }} />
-                {t.menuEditor}
-              </Group>
-            </Title>
-            <Badge color="brand" variant="light" size="sm" radius="sm">
-              API: {endpoints.ADMIN_MENU}
-            </Badge>
-          </Group>
-          <Text size="sm" c="dimmed" mt={4} maw={600}>
-            {t.menuEditorSubtitle}
-          </Text>
-        </div>
-        <Group gap="xs" wrap="wrap">
-          <Button
-            leftSection={<IconPlus size={16} stroke={2.5} />}
-            color="brand"
-            radius="md"
-            onClick={handleOpenAdd}
-          >
-            {t.addNewDish}
-          </Button>
-          <Button
-            variant={showJsonPreview ? 'filled' : 'light'}
-            color="brand"
-            radius="md"
-            leftSection={<IconCode size={16} stroke={2} />}
-            onClick={() => setShowJsonPreview((v) => !v)}
-          >
-            {showJsonPreview ? t.hideJson : t.showJson}
-          </Button>
-          <Button
-            variant="default"
-            radius="md"
-            leftSection={
-              copied ? <IconCheck size={16} stroke={2.5} /> : <IconCopy size={16} stroke={2} />
-            }
-            onClick={handleCopyJson}
-            color={copied ? 'green' : undefined}
-          >
-            {copied ? t.copied : t.copyJson}
-          </Button>
-          <Button
-            variant="default"
-            radius="md"
-            leftSection={<IconDownload size={16} stroke={2} />}
-            onClick={handleDownloadJson}
-          >
-            {t.downloadJson}
-          </Button>
-          <Button
-            variant="subtle"
-            color="gray"
-            size="sm"
-            onClick={() => {
-              if (
-                window.confirm(
-                  isArabic ? 'هل تريد إعادة ضبط القائمة للافتراضي؟' : 'Reset to default menu?'
-                )
-              ) {
-                resetMenu();
-              }
-            }}
-          >
-            {t.resetToDefault}
-          </Button>
-        </Group>
-      </Group>
-      {}
-      <DashboardStats
-        totalDishes={dishes.length}
-        inStockCount={dishes.length - outOfStockCount}
-        outOfStockCount={outOfStockCount}
-        onSaleCount={onSaleCount}
-        isDark={isDark}
-      />
-      {}
-      <DashboardJsonDrawer
-        show={showJsonPreview}
-        isDark={isDark}
-        compiledJson={compiledJson}
-        adminMenuEndpoint={endpoints.ADMIN_MENU}
-        totalDishes={dishes.length}
-        copied={copied}
-        onCopy={handleCopyJson}
-        onDownload={handleDownloadJson}
-      />
-      {}
-      <Paper withBorder p="md" radius="lg">
-        <Group justify="space-between" wrap="wrap" gap="md">
-          <TextInput
-            placeholder={t.searchDishes}
-            value={search}
-            onChange={(e) => setSearch(e.currentTarget.value)}
-            style={{ flex: 1, minWidth: 220 }}
-            radius="md"
-          />
-          <Group gap="xs" wrap="wrap">
-            <SegmentedControl
-              size="xs"
-              radius="md"
-              value={categoryFilter}
-              onChange={setCategoryFilter}
-              data={[
-                { label: t.allCategories, value: 'all' },
-                { label: t.mains, value: 'main' },
-                { label: t.stews, value: 'stew' },
-                { label: t.salads, value: 'salad' },
-                { label: t.sides, value: 'side' },
-              ]}
-            />
-            <SegmentedControl
-              size="xs"
-              radius="md"
-              value={statusFilter}
-              onChange={setStatusFilter}
-              data={[
-                { label: isArabic ? 'الكل' : 'All', value: 'all' },
-                { label: t.inStock, value: 'available' },
-                { label: t.outOfStock, value: 'unavailable' },
-                { label: t.sale, value: 'sale' },
-              ]}
-            />
-          </Group>
-        </Group>
-      </Paper>
-      {}
-      <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="md">
-        {filteredDishes.map((dish) => (
-          <DashboardDishCard
-            key={dish.id}
-            dish={dish}
-            onToggleAvailability={toggleAvailability}
-            onEdit={handleOpenEdit}
-            onDuplicate={duplicateDish}
-            onDelete={deleteDish}
-          />
-        ))}
-      </SimpleGrid>
-      {}
-      <DashboardDishModal
-        opened={modalOpen}
-        onClose={() => setModalOpen(false)}
-        editingDishId={editingDishId}
-        formData={formData}
-        setFormData={setFormData}
-        onSave={handleSaveDish}
-        onRandomizeId={handleRandomizeId}
-        onImageUpload={handleImageUpload}
-        onRemoveImage={handleRemoveImage}
-        onDownloadPicture={handleDownloadPicture}
-        sizeErrors={sizeErrors}
-        perPieceError={perPieceError}
-        hasPriceErrors={hasPriceErrors}
-        isDark={isDark}
-      />
-    </Stack>
-  );
-}
-````
-
-## File: src/pages/Dashboard/dashboard.types.ts
-````typescript
-import type { SizeLabel } from '@/components/DishCard';
-export interface SizeConfig {
-  enabled: boolean;
-  price: number;
-  discountedPrice?: number;
-}
-export interface DishFormData {
-  id?: number;
-  title: string;
-  title_ar: string;
-  description: string;
-  description_ar: string;
-  category: string;
-  image: string;
-  uploadedDataUrl?: string;
-  imageExtension?: string;
-  sale: boolean;
-  available: boolean;
-  sizes: {
-    S?: SizeConfig;
-    M?: SizeConfig;
-    L?: SizeConfig;
-  };
-  hasPerPiece: boolean;
-  perPiecePrice: number;
-  perPieceDiscounted?: number;
-}
-export const DEFAULT_FORM: DishFormData = {
-  title: '',
-  title_ar: '',
-  description: '',
-  description_ar: '',
-  category: 'main',
-  image: 'maincourse',
-  sale: false,
-  available: true,
-  sizes: {
-    S: { enabled: true, price: 150 },
-    M: { enabled: false, price: 200 },
-    L: { enabled: false, price: 280 },
-  },
-  hasPerPiece: false,
-  perPiecePrice: 35,
-};
-````
-
 ## File: src/pages/Dashboard/index.ts
 ````typescript
 export { DashboardPage } from './Dashboard.page';
@@ -6813,91 +4780,6 @@ export function getNeumorphicModalStyles(isDark: boolean) {
 }
 ````
 
-## File: src/theme-integration.test.tsx
-````typescript
-import { render, screen, fireEvent, act } from '@testing-library/react';
-import { describe, it, expect, beforeEach } from 'vitest';
-import App from './App';
-import { AdminTopBar } from './components/TopBar/AdminTopBar';
-import { MantineProvider } from '@mantine/core';
-import { LanguageProvider } from './context/LanguageContext';
-import { BrowserRouter } from 'react-router-dom';
-import { theme } from './theme';
-import { createUnifiedColorSchemeManager } from './App';
-describe('Theme System Integration', () => {
-  let store: Record<string, string> = {};
-  beforeEach(() => {
-    store = {};
-    Object.defineProperty(window, 'localStorage', {
-      value: {
-        getItem: (k: string) => store[k] ?? null,
-        setItem: (k: string, v: string) => {
-          store[k] = v;
-        },
-        removeItem: (k: string) => {
-          delete store[k];
-        },
-        clear: () => {
-          for (const k in store) delete store[k];
-        },
-      },
-      writable: true,
-    });
-    document.documentElement.removeAttribute('data-mantine-color-scheme');
-  });
-  it('loads dark mode when stored in mantine-color-scheme-value', () => {
-    store['mantine-color-scheme-value'] = 'dark';
-    render(<App />);
-    expect(document.documentElement.getAttribute('data-mantine-color-scheme')).toBe('dark');
-  });
-  it('loads dark mode when stored in mama-kitchen-color-scheme', () => {
-    store['mama-kitchen-color-scheme'] = 'dark';
-    render(<App />);
-    expect(document.documentElement.getAttribute('data-mantine-color-scheme')).toBe('dark');
-  });
-  it('cycles from light to dark and back to light cleanly on storefront TopBar', () => {
-    render(<App />);
-    const themeBtn = screen.getByRole('button', { name: /Toggle color scheme|تبديل المظهر/i });
-    act(() => {
-      fireEvent.click(themeBtn);
-    });
-    expect(document.documentElement.getAttribute('data-mantine-color-scheme')).toBe('dark');
-    expect(store['mantine-color-scheme-value']).toBe('dark');
-    expect(store['mama-kitchen-color-scheme']).toBe('dark');
-    act(() => {
-      fireEvent.click(themeBtn);
-    });
-    expect(document.documentElement.getAttribute('data-mantine-color-scheme')).toBe('light');
-    expect(store['mantine-color-scheme-value']).toBe('light');
-    expect(store['mama-kitchen-color-scheme']).toBe('light');
-  });
-  it('toggles theme properly in AdminTopBar and synchronizes both storage keys', () => {
-    render(
-      <MantineProvider theme={theme} colorSchemeManager={createUnifiedColorSchemeManager()} defaultColorScheme="light">
-        <LanguageProvider>
-          <BrowserRouter>
-            <AdminTopBar />
-          </BrowserRouter>
-        </LanguageProvider>
-      </MantineProvider>
-    );
-    const themeBtn = screen.getByRole('button', { name: /Toggle color scheme|تبديل المظهر/i });
-    act(() => {
-      fireEvent.click(themeBtn);
-    });
-    expect(document.documentElement.getAttribute('data-mantine-color-scheme')).toBe('dark');
-    expect(store['mantine-color-scheme-value']).toBe('dark');
-    expect(store['mama-kitchen-color-scheme']).toBe('dark');
-    act(() => {
-      fireEvent.click(themeBtn);
-    });
-    expect(document.documentElement.getAttribute('data-mantine-color-scheme')).toBe('light');
-    expect(store['mantine-color-scheme-value']).toBe('light');
-    expect(store['mama-kitchen-color-scheme']).toBe('light');
-  });
-});
-````
-
 ## File: src/theme.ts
 ````typescript
 import { createTheme, type MantineColorsTuple } from '@mantine/core';
@@ -7063,111 +4945,6 @@ describe('orderValidation - Strict Regex & Arabic Letters/Numerals Validation', 
 });
 ````
 
-## File: src/utils/orderValidation.ts
-````typescript
-export const ARABIC_LETTERS = '\u0621-\u064A\u064B-\u065F\u0671-\u06D3';
-export const ARABIC_NUMERALS = '\u0660-\u0669\u06F0-\u06F9';
-export function normalizeArabicNumerals(input: string): string {
-  if (!input) return '';
-  return input
-    .replace(/[\u0660-\u0669]/g, (c) => String(c.charCodeAt(0) - 0x0660))
-    .replace(/[\u06F0-\u06F9]/g, (c) => String(c.charCodeAt(0) - 0x06F0));
-}
-// Name regex: Arabic and Latin letters, spaces, hyphens, apostrophes (2 to 60 characters).
-// Numbers (both Western 0-9 and Arabic ٠-٩) and punctuation are strictly disallowed.
-export const NAME_REGEX = new RegExp(
-  `^[${ARABIC_LETTERS}A-Za-z][${ARABIC_LETTERS}A-Za-z\\s'-]{1,59}$`
-);
-// Phone regex (operates on normalized digits):
-// Egyptian mobiles: 01[0125]xxxxxxxx (11 digits), or with +20 / 0020 prefix
-// Sudanese mobiles: 09xxxxxxxx or 01[012]xxxxxxx (10 digits), or with +249 / 00249 prefix
-export const PHONE_REGEX =
-  /^(?:(?:(?:\+20|0020)?0?1[0125]\d{8})|(?:(?:\+249|00249)?(?:0?9\d{8}|0?1[012]\d{7})))$/;
-// Delivery Address regex:
-// 6 to 150 characters, letters (Arabic & English), numbers (Arabic ٠-٩ & Western 0-9), spaces,
-// and address punctuation (including Arabic comma ، \u060C, periods, slashes, hyphens, hashes)
-export const ADDRESS_REGEX = new RegExp(
-  `^[${ARABIC_LETTERS}A-Za-z0-9${ARABIC_NUMERALS}\\s,،./#\\-–]{6,150}$`
-);
-// Address must contain at least 2 actual letters (Arabic or English), not just digits
-export const ADDRESS_HAS_LETTERS_REGEX = new RegExp(`[${ARABIC_LETTERS}A-Za-z]{2,}`);
-export interface ValidationResult {
-  isValid: boolean;
-  nameError?: string;
-  phoneError?: string;
-  addressError?: string;
-}
-export interface ValidateOrderParams {
-  name: string;
-  phone: string;
-  address: string;
-  orderType: 'delivery' | 'takeout';
-  t: {
-    nameErrorEmpty: string;
-    nameErrorInvalid: string;
-    phoneErrorEmpty: string;
-    phoneErrorInvalid: string;
-    addressErrorEmpty: string;
-    addressErrorInvalid: string;
-  };
-}
-export function validateCustomerName(
-  name: string,
-  t: { nameErrorEmpty: string; nameErrorInvalid: string }
-): string | undefined {
-  const trimmed = name.trim();
-  if (!trimmed) {
-    return t.nameErrorEmpty;
-  }
-  if (!NAME_REGEX.test(trimmed)) {
-    return t.nameErrorInvalid;
-  }
-  return undefined;
-}
-export function validateCustomerPhone(
-  phone: string,
-  t: { phoneErrorEmpty: string; phoneErrorInvalid: string }
-): string | undefined {
-  const normalized = normalizeArabicNumerals(phone).replace(/[\s\-()]/g, '');
-  if (!normalized) {
-    return t.phoneErrorEmpty;
-  }
-  if (!PHONE_REGEX.test(normalized)) {
-    return t.phoneErrorInvalid;
-  }
-  return undefined;
-}
-export function validateCustomerAddress(
-  address: string,
-  orderType: 'delivery' | 'takeout',
-  t: { addressErrorEmpty: string; addressErrorInvalid: string }
-): string | undefined {
-  if (orderType === 'takeout') {
-    return undefined;
-  }
-  const trimmed = address.trim();
-  if (!trimmed) {
-    return t.addressErrorEmpty;
-  }
-  if (!ADDRESS_REGEX.test(trimmed) || !ADDRESS_HAS_LETTERS_REGEX.test(trimmed)) {
-    return t.addressErrorInvalid;
-  }
-  return undefined;
-}
-export function validateOrderDetails(params: ValidateOrderParams): ValidationResult {
-  const nameError = validateCustomerName(params.name, params.t);
-  const phoneError = validateCustomerPhone(params.phone, params.t);
-  const addressError = validateCustomerAddress(params.address, params.orderType, params.t);
-  const isValid = !nameError && !phoneError && !addressError;
-  return {
-    isValid,
-    nameError,
-    phoneError,
-    addressError,
-  };
-}
-````
-
 ## File: tsconfig.app.json
 ````json
 {
@@ -7301,6 +5078,1270 @@ jobs:
 </html>
 ````
 
+## File: middleware.ts
+````typescript
+export const config = {
+  matcher: ['/admin', '/admin/:path*', '/dashboard', '/dashboard/:path*'],
+};
+const SESSION_PAYLOAD = 'mama_kitchen_admin_session_v1';
+const COOKIE_NAME = 'mama_admin_session';
+function parseCookies(cookieHeader: string): Record<string, string> {
+  return Object.fromEntries(
+    cookieHeader
+      .split(';')
+      .map((c) => c.trim().split('='))
+      .filter(([k]) => k)
+      .map(([k, ...v]) => [k.trim(), v.join('=').trim()])
+  );
+}
+function safeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) {return false;}
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) {
+    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return diff === 0;
+}
+async function computeExpectedToken(secret: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    'raw',
+    encoder.encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+  const signature = await crypto.subtle.sign(
+    'HMAC',
+    key,
+    encoder.encode(SESSION_PAYLOAD)
+  );
+  return Array.from(new Uint8Array(signature))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+export default async function middleware(request: Request): Promise<Response | undefined> {
+  const cookieHeader = request.headers.get('cookie') ?? '';
+  const cookies = parseCookies(cookieHeader);
+  const sessionCookie = cookies[COOKIE_NAME];
+  // No cookie present — redirect to login page
+  if (!sessionCookie) {
+    return Response.redirect(new URL('/admin-login', request.url), 302);
+  }
+  const secret =
+    process.env.SESSION_SECRET ||
+    (process.env.ADMIN_PASS ? `session_${process.env.ADMIN_PASS}` : 'mama_kitchen_default_session_secret_2026');
+  try {
+    const expected = await computeExpectedToken(secret);
+    if (!safeEqual(sessionCookie, expected)) {
+      return Response.redirect(new URL('/admin-login', request.url), 302);
+    }
+  } catch {
+    return Response.redirect(new URL('/admin-login', request.url), 302);
+  }
+  return undefined;
+}
+````
+
+## File: src/api/supabase.ts
+````typescript
+import { createClient } from '@supabase/supabase-js';
+const supabaseUrl = process.env.SUPABASE_URL || '';
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+export const supabase = createClient(supabaseUrl, supabaseServiceKey);
+export interface UpdateProductsRequestBody {
+    products: unknown[];
+    googleToken: string;
+}
+export interface GoogleTokenInfo {
+    email?: string;
+    [key: string]: unknown;
+}
+export interface ApiRequest {
+    method?: string;
+    body: UpdateProductsRequestBody;
+}
+export interface ApiResponse {
+    status: (statusCode: number) => ApiResponse;
+    json: (data: { success?: boolean; message?: string; error?: string }) => void;
+}
+export default async function handler(req: ApiRequest, res: ApiResponse) {
+    // 1. Only allow secure POST requests from your dashboard
+    if (req.method !== 'POST') {
+        return res.status(405).json({ error: 'Method not allowed' });
+    }
+    try {
+        const { products, googleToken } = req.body;
+        const googleVerify = await fetch(
+            `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(googleToken)}`
+        );
+        const tokenInfo = (await googleVerify.json()) as GoogleTokenInfo;
+        if (!googleVerify.ok || tokenInfo.email !== 'the_owner_email@gmail.com') {
+            return res.status(401).json({ error: 'Unauthorized Google Account' });
+        }
+        await supabase.from('products').delete().neq('id', 0);
+        const { error } = await supabase.from('products').insert(products);
+        if (error) {throw error;}
+        return res.status(200).json({ success: true, message: 'Inventory updated instantly!' });
+    } catch (err) {
+        const message = err instanceof Error ? err.message : 'An unknown error occurred';
+        return res.status(500).json({ error: message });
+    }
+}
+````
+
+## File: src/App.tsx
+````typescript
+import '@mantine/core/styles.css';
+import { MantineColorScheme, MantineColorSchemeManager, MantineProvider } from '@mantine/core';
+import { CartProvider } from './context/CartContext';
+import { LanguageProvider } from './context/LanguageContext';
+import { MenuProvider } from './context/MenuContext';
+import { Router } from './Router';
+import { theme } from './theme';
+export function createUnifiedColorSchemeManager(): MantineColorSchemeManager {
+  return {
+    get: (defaultValue: MantineColorScheme) => {
+      if (typeof window === 'undefined') {return defaultValue;}
+      try {
+        const val =
+          localStorage.getItem('mantine-color-scheme-value') ||
+          localStorage.getItem('mama-kitchen-color-scheme');
+        if (val === 'dark' || val === 'light' || val === 'auto') {return val;}
+        return defaultValue;
+      } catch {
+        return defaultValue;
+      }
+    },
+    set: (value: MantineColorScheme) => {
+      try {
+        localStorage.setItem('mantine-color-scheme-value', value);
+        localStorage.setItem('mama-kitchen-color-scheme', value);
+      } catch {
+      }
+    },
+    subscribe: (onUpdate: (colorScheme: MantineColorScheme) => void) => {
+      const listener = (e: StorageEvent) => {
+        if (e.key === 'mantine-color-scheme-value' || e.key === 'mama-kitchen-color-scheme') {
+          if (e.newValue === 'dark' || e.newValue === 'light' || e.newValue === 'auto') {
+            onUpdate(e.newValue);
+          }
+        }
+      };
+      window.addEventListener('storage', listener);
+      return () => window.removeEventListener('storage', listener);
+    },
+    unsubscribe: () => {},
+    clear: () => {
+      try {
+        localStorage.removeItem('mantine-color-scheme-value');
+        localStorage.removeItem('mama-kitchen-color-scheme');
+      } catch {
+      }
+    },
+  };
+}
+const colorSchemeManager = createUnifiedColorSchemeManager();
+export default function App() {
+  return (
+    <MantineProvider
+      theme={theme}
+      colorSchemeManager={colorSchemeManager}
+      defaultColorScheme="light"
+    >
+      <LanguageProvider>
+        <MenuProvider>
+          <CartProvider>
+            <Router />
+          </CartProvider>
+        </MenuProvider>
+      </LanguageProvider>
+    </MantineProvider>
+  );
+}
+````
+
+## File: src/archive/Home.page.v1.tsx
+````typescript
+import { Badge, Card, CardSection, Group, Image, Text } from '@mantine/core';
+import { useHover } from '@mantine/hooks';
+import image from '@/assets/images/agashi.jpg';
+export function HomePage() {
+  const { hovered, ref } = useHover();
+  return (
+    <>
+      <Card w={280} shadow="sm" withBorder radius="lg" ref={ref}>
+        <CardSection>
+          <Image height={160} src={image} alt="Norway" />
+        </CardSection>
+        <Group justify="space-between" align="center" mt="md" mb="xs">
+          <Group gap="xs" align="center">
+            <Text fw={600}>Agashi</Text>
+            <Badge color="red">Sale</Badge>
+          </Group>
+          <Group gap={6} align="baseline">
+            <Text fw={700} size="sm">
+              55 EGP
+            </Text>
+            <Text td="line-through" c="dimmed" size="xs">
+              75 EGP
+            </Text>
+          </Group>
+        </Group>
+        <Text size="sm" c="dimmed">
+          A Sudanese delicacy made with the hands of its mothers
+        </Text>
+      </Card>
+    </>
+  );
+}
+````
+
+## File: src/components/DishCard/DishCard.tsx
+````typescript
+import React, { useState } from 'react';
+import { IconCheck } from '@tabler/icons-react';
+import {
+  Box,
+  Button,
+  Card,
+  Group,
+  Image,
+  Stack,
+  Text,
+  Transition,
+  useComputedColorScheme,
+} from '@mantine/core';
+import { useHover } from '@mantine/hooks';
+import { useCart } from '@/context/CartContext';
+import { useLanguage } from '@/context/LanguageContext';
+import { brandTokens, getNeumorphicCardStyle } from '@/styles/neumorphic';
+import type { DishCardProps, DishSize, SizeLabel } from './DishCard.types';
+import { DishDetailModal } from './DishDetailModal';
+import { PriceTagCapsule } from './PriceTagCapsule';
+import { SaleBadge } from './SaleBadge';
+export function DishCard({
+  id,
+  title,
+  title_ar,
+  description,
+  description_ar,
+  image,
+  sale,
+  sizes,
+  perPiece,
+  available = true,
+}: DishCardProps) {
+  const { hovered, ref } = useHover();
+  const { addItem } = useCart();
+  const { t, isArabic } = useLanguage();
+  const computedColorScheme = useComputedColorScheme('light', { getInitialValueInEffect: false });
+  const isDark = computedColorScheme === 'dark';
+  const [modalOpen, setModalOpen] = useState(false);
+  const [added, setAdded] = useState(false);
+  const safeSizes = sizes && sizes.length > 0 ? sizes : [{ label: 'S' as SizeLabel, price: 0 }];
+  const defaultSize = safeSizes[0];
+  const currentTitle = isArabic && title_ar ? title_ar : title;
+  const secondaryTitle = isArabic ? title : title_ar;
+  const currentDesc = isArabic && description_ar ? description_ar : description;
+  const isSale = Boolean(sale && (defaultSize?.discountedPrice != null || perPiece?.discountedPrice != null));
+  const displayPrice = isSale && defaultSize?.discountedPrice != null
+    ? defaultSize.discountedPrice
+    : defaultSize.price;
+  const originalPrice = isSale && defaultSize?.discountedPrice != null
+    ? defaultSize.price
+    : null;
+  const handleQuickAddToCart = (e?: React.MouseEvent) => {
+    if (e) {e.stopPropagation();}
+    if (!available) {return;}
+    addItem({
+      dishId: id ?? Math.floor(Math.random() * 100000),
+      title: currentTitle,
+      sizeLabel: defaultSize.label,
+      unitPrice: displayPrice,
+      quantity: 1,
+      image,
+    });
+    setAdded(true);
+    setTimeout(() => setAdded(false), 1400);
+  };
+  const handleModalAddToCart = (selection: { sizeLabel: string; unitPrice: number; quantity: number }) => {
+    if (!available) {return;}
+    addItem({
+      dishId: id ?? Math.floor(Math.random() * 100000),
+      title: currentTitle,
+      sizeLabel: selection.sizeLabel,
+      unitPrice: selection.unitPrice,
+      quantity: selection.quantity,
+      image,
+    });
+  };
+  return (
+    <>
+      <Card
+        ref={ref}
+        radius="lg"
+        p={0}
+        withBorder={false}
+        onClick={() => available && setModalOpen(true)}
+        style={getNeumorphicCardStyle(isDark, hovered, available)}
+      >
+        {}
+        {!available && (
+          <Box
+            pos="absolute"
+            top={0}
+            left={0}
+            right={0}
+            bottom={0}
+            style={{
+              zIndex: 10,
+              backgroundColor: 'rgba(28, 20, 16, 0.55)',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderRadius: 'inherit',
+              pointerEvents: 'auto',
+              cursor: 'not-allowed',
+            }}
+          >
+            <SaleBadge variant="dark" size="md">
+              {t.unavailable}
+            </SaleBadge>
+          </Box>
+        )}
+        {}
+        <Box pos="relative">
+          <Image
+            src={image}
+            alt={currentTitle}
+            height={135}
+            style={{ objectFit: 'cover', display: 'block', width: '100%' }}
+          />
+          <Transition mounted={sale && hovered} transition="fade" duration={200}>
+            {(styles) => (
+              <Box
+                pos="absolute"
+                top={0}
+                left={0}
+                right={0}
+                bottom={0}
+                style={{ ...styles, background: 'rgba(0,0,0,0.18)' }}
+              />
+            )}
+          </Transition>
+          {sale && <SaleBadge absolute />}
+        </Box>
+        {}
+        <Stack gap={6} p="xs" pt="sm">
+          <Text fw={700} size="sm" lh={1.2} lineClamp={1}>
+            {currentTitle}
+          </Text>
+          <Text
+            size="xs"
+            lineClamp={2}
+            style={{ color: isDark ? '#D4BFA8' : '#5a3a28', minHeight: 32 }}
+          >
+            {currentDesc}
+          </Text>
+          <Group justify="space-between" align="center" mt={4}>
+            <PriceTagCapsule
+              isDark={isDark}
+              isOnSale={isSale}
+              available={available}
+              displayPrice={displayPrice}
+              originalPrice={originalPrice}
+            />
+            {available && (
+              <Button
+                size="xs"
+                radius="md"
+                leftSection={added ? <IconCheck size={14} stroke={2.5} /> : undefined}
+                onClick={handleQuickAddToCart}
+                style={{
+                  fontWeight: 800,
+                  transition: 'background-color 150ms ease, border-color 150ms ease, color 150ms ease',
+                  backgroundColor: added ? '#2f9e44' : isDark ? '#2e2019' : '#FFF3F0',
+                  color: added ? '#FFFFFF' : brandTokens.red,
+                  border: `1px solid ${
+                    added ? '#40c057' : isDark ? 'rgba(255, 255, 255, 0.12)' : 'rgba(0, 0, 0, 0.08)'
+                  }`,
+                  boxShadow: added
+                    ? '0 2px 8px rgba(47, 158, 68, 0.3)'
+                    : '0 1px 3px rgba(0,0,0,0.05)',
+                }}
+              >
+                {added ? t.addedToOrder : t.addToOrder}
+              </Button>
+            )}
+          </Group>
+        </Stack>
+      </Card>
+      {}
+      <DishDetailModal
+        opened={modalOpen}
+        onClose={() => setModalOpen(false)}
+        title={currentTitle}
+        secondaryTitle={secondaryTitle}
+        description={currentDesc}
+        image={image}
+        sale={Boolean(sale)}
+        sizes={safeSizes}
+        perPiece={perPiece}
+        isDark={isDark}
+        onAddToCart={handleModalAddToCart}
+      />
+    </>
+  );
+}
+````
+
+## File: src/components/DishCard/DishDetailModal.tsx
+````typescript
+import React, { useState } from 'react';
+import { IconCheck, IconMinus, IconPlus, IconShoppingCart } from '@tabler/icons-react';
+import {
+  ActionIcon,
+  Box,
+  Button,
+  Divider,
+  Group,
+  Image,
+  Modal,
+  Stack,
+  Text,
+} from '@mantine/core';
+import { useLanguage } from '@/context/LanguageContext';
+import {
+  brandTokens,
+  getNeumorphicChipStyle,
+  getNeumorphicControlStyle,
+  getNeumorphicModalStyles,
+  getNeumorphicStepperContainerStyle,
+  neumorphicTokens,
+} from '@/styles/neumorphic';
+import type { DishSize, PerPieceOption, SizeLabel } from './DishCard.types';
+import { SaleBadge } from './SaleBadge';
+const ALL_SIZES: SizeLabel[] = ['S', 'M', 'L'];
+export interface DishDetailModalProps {
+  opened: boolean;
+  onClose: () => void;
+  title: string;
+  secondaryTitle?: string;
+  description: string;
+  image: string;
+  sale: boolean;
+  sizes: DishSize[];
+  perPiece?: PerPieceOption;
+  isDark: boolean;
+  onAddToCart: (selection: { sizeLabel: string; unitPrice: number; quantity: number }) => void;
+}
+export function DishDetailModal({
+  opened,
+  onClose,
+  title,
+  secondaryTitle,
+  description,
+  image,
+  sale,
+  sizes,
+  perPiece,
+  isDark,
+  onAddToCart,
+}: DishDetailModalProps) {
+  const { t, isArabic } = useLanguage();
+  const safeSizes = sizes && sizes.length > 0 ? sizes : [{ label: 'S' as SizeLabel, price: 0 }];
+  const [selectedType, setSelectedType] = useState<'size' | 'piece'>('size');
+  const [selectedSize, setSelectedSize] = useState<DishSize>(safeSizes[0]);
+  const [pieceQty, setPieceQty] = useState<number>(1);
+  const [added, setAdded] = useState(false);
+  const isPieceMode = selectedType === 'piece' && !!perPiece;
+  const isSizeSale = Boolean(sale && selectedSize?.discountedPrice != null);
+  const isPieceSale = Boolean(sale && perPiece?.discountedPrice != null);
+  const isOnSale = isPieceMode ? isPieceSale : isSizeSale;
+  const originalUnitPrice = isPieceMode
+    ? (perPiece?.price ?? 0)
+    : (selectedSize?.price ?? 0);
+  const unitPrice = isPieceMode
+    ? isPieceSale
+      ? perPiece.discountedPrice!
+      : perPiece.price
+    : selectedSize
+      ? isSizeSale
+        ? selectedSize.discountedPrice!
+        : selectedSize.price
+      : 0;
+  const displayPrice = isPieceMode ? unitPrice * pieceQty : unitPrice;
+  const originalDisplayPrice = isPieceMode ? originalUnitPrice * pieceQty : originalUnitPrice;
+  const handleAdd = () => {
+    onAddToCart({
+      sizeLabel: isPieceMode ? (isArabic ? 'قطعة' : 'Pc') : selectedSize.label,
+      unitPrice,
+      quantity: isPieceMode ? pieceQty : 1,
+    });
+    setAdded(true);
+    setTimeout(() => setAdded(false), 1400);
+  };
+  return (
+    <Modal
+      opened={opened}
+      onClose={onClose}
+      size="lg"
+      radius="lg"
+      centered
+      title={
+        <Group gap="xs" align="center" wrap="nowrap">
+          <Text fw={800} size="lg" style={{ color: isDark ? '#FFF9F0' : '#2A170A' }}>
+            {title}
+          </Text>
+          {sale && <SaleBadge />}
+        </Group>
+      }
+      styles={getNeumorphicModalStyles(isDark)}
+    >
+      <Stack gap="md">
+        {}
+        <Box
+          pos="relative"
+          style={{
+            borderRadius: 12,
+            overflow: 'hidden',
+            boxShadow: neumorphicTokens.shadows.image[isDark ? 'dark' : 'light'],
+          }}
+        >
+          <Image
+            src={image}
+            alt={title}
+            height={240}
+            style={{ objectFit: 'cover', width: '100%', display: 'block' }}
+          />
+          {sale && <SaleBadge absolute size="md" />}
+        </Box>
+        {}
+        {secondaryTitle && (
+          <Text
+            size="xs"
+            fw={700}
+            style={{ color: isDark ? '#C9A880' : '#8A6340', marginTop: -6 }}
+          >
+            {secondaryTitle}
+          </Text>
+        )}
+        {}
+        <Text
+          size="sm"
+          style={{
+            color: isDark ? '#FDF2F0' : '#2A170A',
+            fontWeight: 500,
+            lineHeight: 1.7,
+          }}
+        >
+          {description}
+        </Text>
+        <Divider color={`${brandTokens.gold}33`} />
+        {}
+        <Stack gap={6}>
+          <Text
+            size="xs"
+            fw={700}
+            tt="uppercase"
+            style={{ color: isDark ? '#C9A880' : '#7A5235', letterSpacing: '0.04em' }}
+          >
+            {t.sizesConfig || t.size}
+          </Text>
+          <Group gap={8} wrap="wrap">
+            {ALL_SIZES.map((label) => {
+              const sizeObj = sizes.find((s) => s.label === label);
+              if (!sizeObj) {return null;}
+              const isSelected = selectedType === 'size' && selectedSize.label === label;
+              const hasDiscount = Boolean(sale && sizeObj.discountedPrice != null);
+              const displayP = hasDiscount ? sizeObj.discountedPrice! : sizeObj.price;
+              return (
+                <Box
+                  key={label}
+                  onClick={() => {
+                    setSelectedSize(sizeObj);
+                    setSelectedType('size');
+                  }}
+                  style={getNeumorphicChipStyle(isDark, isSelected)}
+                >
+                  <Text
+                    fw={900}
+                    size="sm"
+                    style={{
+                      color: isSelected ? '#FFFFFF' : isDark ? '#E8A89E' : brandTokens.red,
+                    }}
+                  >
+                    {label}
+                  </Text>
+                  <Group gap={4} align="baseline" wrap="nowrap">
+                    {hasDiscount && (
+                      <Text
+                        size="xs"
+                        fw={700}
+                        style={{
+                          color: isSelected
+                            ? 'rgba(255, 255, 255, 0.75)'
+                            : isDark
+                              ? 'rgba(255, 255, 255, 0.45)'
+                              : 'rgba(140, 28, 19, 0.55)',
+                          textDecoration: 'line-through',
+                        }}
+                      >
+                        {sizeObj.price}
+                      </Text>
+                    )}
+                    <Text
+                      fw={800}
+                      size="sm"
+                      style={{
+                        color: isSelected ? '#FFE066' : isDark ? '#FFE066' : '#7A1C14',
+                      }}
+                    >
+                      {displayP} {t.egp}
+                    </Text>
+                  </Group>
+                </Box>
+              );
+            })}
+            {perPiece && (
+              <Box
+                onClick={() => setSelectedType('piece')}
+                style={getNeumorphicChipStyle(isDark, isPieceMode)}
+              >
+                <Text
+                  fw={900}
+                  size="sm"
+                  style={{
+                    color: isPieceMode ? '#FFFFFF' : isDark ? '#E8A89E' : brandTokens.red,
+                  }}
+                >
+                  {t.perPieceLabel}
+                </Text>
+                <Group gap={4} align="baseline" wrap="nowrap">
+                  {sale && perPiece.discountedPrice != null && (
+                    <Text
+                      size="xs"
+                      fw={700}
+                      style={{
+                        color: isPieceMode
+                          ? 'rgba(255, 255, 255, 0.75)'
+                          : isDark
+                            ? 'rgba(255, 255, 255, 0.45)'
+                            : 'rgba(140, 28, 19, 0.55)',
+                        textDecoration: 'line-through',
+                      }}
+                    >
+                      {perPiece.price}
+                    </Text>
+                  )}
+                  <Text
+                    fw={800}
+                    size="sm"
+                    style={{
+                      color: isPieceMode ? '#FFE066' : isDark ? '#FFE066' : '#7A1C14',
+                    }}
+                  >
+                    {sale && perPiece.discountedPrice != null
+                      ? perPiece.discountedPrice
+                      : perPiece.price}{' '}
+                    {t.egp}
+                  </Text>
+                </Group>
+              </Box>
+            )}
+          </Group>
+        </Stack>
+        {}
+        {isPieceMode && perPiece && (
+          <Group
+            justify="space-between"
+            align="center"
+            p="sm"
+            style={getNeumorphicStepperContainerStyle(isDark)}
+          >
+            <Text size="sm" fw={700} style={{ color: isDark ? '#D4BFA8' : '#5A3A28' }}>
+              {t.quantity}:
+            </Text>
+            <Group gap={8} align="center">
+              <ActionIcon
+                size="md"
+                variant="default"
+                radius="md"
+                style={getNeumorphicControlStyle(isDark)}
+                onClick={() => setPieceQty((q) => Math.max(1, q - 1))}
+                aria-label="Decrease quantity"
+              >
+                <IconMinus size={14} stroke={2.5} />
+              </ActionIcon>
+              <Text
+                size="sm"
+                fw={900}
+                style={{
+                  minWidth: 26,
+                  textAlign: 'center',
+                  color: isDark ? '#FFE066' : brandTokens.red,
+                }}
+              >
+                {pieceQty}
+              </Text>
+              <ActionIcon
+                size="md"
+                variant="default"
+                radius="md"
+                style={getNeumorphicControlStyle(isDark)}
+                onClick={() => setPieceQty((q) => q + 1)}
+                aria-label="Increase quantity"
+              >
+                <IconPlus size={14} stroke={2.5} />
+              </ActionIcon>
+              <Text
+                size="sm"
+                fw={900}
+                style={{
+                  color: isDark ? '#FFE066' : '#7A1C14',
+                  backgroundColor: isDark
+                    ? 'rgba(255, 224, 102, 0.15)'
+                    : 'rgba(140, 28, 19, 0.08)',
+                  padding: '2px 8px',
+                  borderRadius: 6,
+                  border: isDark ? 'none' : '1px solid rgba(140, 28, 19, 0.15)',
+                  boxShadow: isDark
+                    ? '0 0 6px rgba(0, 0, 0, 0.35)'
+                    : '0 0 6px rgba(130, 85, 55, 0.06), 0 0 4px rgba(255, 255, 255, 0.8)',
+                  marginLeft: 6,
+                }}
+              >
+                {t.totalAmount} {unitPrice * pieceQty} {t.egp}
+              </Text>
+            </Group>
+          </Group>
+        )}
+        <Divider color={isDark ? 'rgba(255, 255, 255, 0.04)' : `${brandTokens.gold}33`} />
+        {}
+        <Group justify="space-between" align="center" wrap="nowrap">
+          <div>
+            <Text size="xs" fw={600} style={{ color: isDark ? '#C9A880' : '#7A5235' }}>
+              {t.totalAmount}
+            </Text>
+            <Group gap={6} align="baseline">
+              <Text
+                fw={900}
+                size="xl"
+                style={{
+                  color: isOnSale
+                    ? isDark
+                      ? '#FF8787'
+                      : '#9B2018'
+                    : isDark
+                      ? '#FFE066'
+                      : '#6B1510',
+                  lineHeight: 1.1,
+                }}
+              >
+                {displayPrice} {t.egp}
+              </Text>
+              {isOnSale && originalDisplayPrice > displayPrice && (
+                <Text
+                  size="xs"
+                  fw={600}
+                  style={{
+                    color: isDark ? '#A9927D' : '#8C7260',
+                    textDecoration: 'line-through',
+                  }}
+                >
+                  {originalDisplayPrice} {t.egp}
+                </Text>
+              )}
+            </Group>
+          </div>
+          <Button
+            size="md"
+            radius="xl"
+            leftSection={
+              added ? (
+                <IconCheck size={18} stroke={2.5} />
+              ) : (
+                <IconShoppingCart size={18} stroke={2} />
+              )
+            }
+            onClick={handleAdd}
+            style={{
+              fontWeight: 800,
+              minWidth: 160,
+              backgroundColor: added ? '#2f9e44' : brandTokens.red,
+              color: '#ffffff',
+              boxShadow: added
+                ? '0 4px 14px rgba(47, 158, 68, 0.4)'
+                : '0 4px 14px rgba(140, 28, 19, 0.35)',
+              border: 'none',
+              transition: 'background-color 150ms ease, transform 100ms ease, box-shadow 150ms ease',
+            }}
+          >
+            {added ? t.addedToOrder : t.addToOrder}
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
+  );
+}
+````
+
+## File: src/components/DishCard/DishListItem.tsx
+````typescript
+import { Box, Button, Collapse, Group, Image, Stack, Text, useComputedColorScheme } from '@mantine/core';
+import { useHover } from '@mantine/hooks';
+import { IconChevronDown, IconMinus, IconPlus } from '@tabler/icons-react';
+import { useState } from 'react';
+import { useCart } from '@/context/CartContext';
+import { useLanguage } from '@/context/LanguageContext';
+import { brandTokens } from '@/theme';
+import {
+  getNeumorphicPriceTagStyle,
+  getNeumorphicChipStyle,
+  getNeumorphicControlStyle,
+  neumorphicTokens,
+} from '@/styles/neumorphic';
+import { SaleBadge } from './SaleBadge';
+import { PriceTagCapsule } from './PriceTagCapsule';
+import type { DishCardProps, DishSize, SizeLabel } from './DishCard.types';
+const ALL_SIZES: SizeLabel[] = ['S', 'M', 'L'];
+function SizeButton({
+  label,
+  size,
+  selected,
+  sale,
+  isDark,
+  onClick,
+}: {
+  label: SizeLabel;
+  size?: DishSize;
+  selected: boolean;
+  sale: boolean;
+  isDark: boolean;
+  onClick: () => void;
+}) {
+  const available = !!size;
+  const hasDiscount = Boolean(sale && size?.discountedPrice != null);
+  const displayPrice = hasDiscount ? size!.discountedPrice : size?.price;
+  return (
+    <Box
+      onClick={available ? onClick : undefined}
+      style={{
+        ...getNeumorphicChipStyle(isDark, selected),
+        padding: '4px 10px',
+        borderRadius: 6,
+        gap: 6,
+        cursor: available ? 'pointer' : 'default',
+        opacity: available ? 1 : 0.35,
+      }}
+    >
+      <Text
+        size="xs"
+        fw={900}
+        style={{ color: selected ? '#FFFFFF' : isDark ? '#E8A89E' : brandTokens.red }}
+      >
+        {label}
+      </Text>
+      {available && (
+        <Group gap={4} align="baseline" wrap="nowrap">
+          {hasDiscount && (
+            <Text
+              size="10px"
+              fw={700}
+              style={{
+                color: selected
+                  ? 'rgba(255, 255, 255, 0.75)'
+                  : isDark
+                    ? 'rgba(255, 255, 255, 0.45)'
+                    : 'rgba(107, 21, 16, 0.55)',
+                textDecoration: 'line-through',
+              }}
+            >
+              {size.price}
+            </Text>
+          )}
+          <Text
+            size="xs"
+            fw={800}
+            style={{
+              color: selected
+                ? '#FFE066'
+                : isDark
+                  ? '#FFE066'
+                  : '#7A1C14',
+              letterSpacing: '0.02em',
+            }}
+          >
+            {displayPrice} EGP
+          </Text>
+        </Group>
+      )}
+    </Box>
+  );
+}
+export function DishListItem({
+  id,
+  title,
+  title_ar,
+  description,
+  description_ar,
+  image,
+  sale,
+  sizes,
+  perPiece,
+  available = true,
+}: DishCardProps) {
+  const { hovered, ref } = useHover();
+  const { addItem } = useCart();
+  const { t, isArabic } = useLanguage();
+  const computedColorScheme = useComputedColorScheme('light', { getInitialValueInEffect: false });
+  const isDark = computedColorScheme === 'dark';
+  const safeSizes = sizes && sizes.length > 0 ? sizes : [{ label: 'S' as SizeLabel, price: 0 }];
+  const [expanded, setExpanded] = useState(false);
+  const [selectedType, setSelectedType] = useState<'size' | 'piece'>('size');
+  const [selectedSize, setSelectedSize] = useState<DishSize>(safeSizes[0]);
+  const [pieceQty, setPieceQty] = useState<number>(1);
+  const [added, setAdded] = useState(false);
+  const currentTitle = isArabic && title_ar ? title_ar : title;
+  const currentDesc = isArabic && description_ar ? description_ar : description;
+  const isPieceMode = selectedType === 'piece' && !!perPiece;
+  const minPrice = Math.min(
+    ...safeSizes.map((s) => s.discountedPrice ?? s.price),
+    perPiece ? (sale && perPiece.discountedPrice != null ? perPiece.discountedPrice : perPiece.price) : Infinity
+  );
+  const maxPrice = Math.max(...safeSizes.map((s) => s.price));
+  const isSingleSize = safeSizes.length === 1 && !perPiece;
+  const isOnSale = Boolean(sale);
+  const priceLabel = isSingleSize
+    ? `${safeSizes[0].discountedPrice ?? safeSizes[0].price} ${t.egp}`
+    : `${minPrice === Infinity ? 0 : minPrice}–${maxPrice === -Infinity ? 0 : maxPrice} ${t.egp}`;
+  const originalPriceLabel = isSingleSize && sale && safeSizes[0].discountedPrice != null
+    ? `${safeSizes[0].price} ${t.egp}`
+    : null;
+  const currentPieceTotal = (perPiece
+    ? (sale && perPiece.discountedPrice != null ? perPiece.discountedPrice : perPiece.price)
+    : 0) * pieceQty;
+  const handleAddToCart = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!available) {return;}
+    const unitPrice = isPieceMode
+      ? (sale && perPiece?.discountedPrice != null ? perPiece.discountedPrice : perPiece?.price ?? 0)
+      : (sale && selectedSize.discountedPrice != null ? selectedSize.discountedPrice : selectedSize.price);
+    addItem({
+      dishId: id ?? Math.floor(Math.random() * 100000),
+      title: currentTitle,
+      sizeLabel: isPieceMode ? (isArabic ? 'قطعة' : 'Pc') : selectedSize.label,
+      unitPrice,
+      quantity: isPieceMode ? pieceQty : 1,
+      image,
+    });
+    setAdded(true);
+    setTimeout(() => setAdded(false), 1200);
+  };
+  return (
+    <Box
+      ref={ref}
+      py="sm"
+      px="sm"
+      pos="relative"
+      onClick={() => available && setExpanded((v) => !v)}
+      style={{
+        cursor: available ? 'pointer' : 'not-allowed',
+        borderBottom: isDark ? 'none' : '1px solid rgba(0, 0, 0, 0.06)',
+        transition:
+          'background 180ms ease, border-radius 180ms ease, box-shadow 180ms ease, filter 150ms ease, opacity 150ms ease, transform 180ms ease',
+        transform: hovered && available && !expanded ? 'translateY(-2px)' : 'none',
+        borderRadius: expanded && available ? 12 : 8,
+        filter: available ? undefined : 'grayscale(0.85)',
+        opacity: available ? 1 : 0.55,
+        background: expanded && available
+          ? (isDark ? 'rgba(255, 255, 255, 0.06)' : '#ffffff')
+          : hovered && available
+            ? (isDark ? 'rgba(255, 255, 255, 0.03)' : 'rgba(255, 255, 255, 0.75)')
+            : 'transparent',
+        boxShadow: expanded && available
+          ? (isDark ? '0 0 24px rgba(0,0,0,0.5)' : '0 0 20px rgba(130, 85, 55, 0.12), 0 0 8px rgba(255, 255, 255, 0.8)')
+          : hovered && available
+            ? (isDark ? '0 0 16px rgba(0,0,0,0.35)' : '0 0 14px rgba(130, 85, 55, 0.08), 0 0 6px rgba(255, 255, 255, 0.6)')
+            : undefined,
+      }}
+    >
+      {}
+      {!available && (
+        <Box
+          pos="absolute"
+          top={0}
+          left={0}
+          right={0}
+          bottom={0}
+          style={{
+            zIndex: 2,
+            backgroundColor: 'rgba(28, 20, 16, 0.15)',
+            borderRadius: 'inherit',
+            pointerEvents: 'none',
+          }}
+        />
+      )}
+      {}
+      <Group justify="space-between" wrap="nowrap" gap="xs">
+        <Group gap="xs" wrap="nowrap" style={{ flex: 1, minWidth: 0 }}>
+          <Text
+            fw={700}
+            size="sm"
+            style={{
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              textDecoration: !available ? 'line-through' : undefined,
+              color: isDark ? '#FFF9F0' : '#2A170A',
+              flexShrink: 1,
+              minWidth: 0,
+            }}
+          >
+            {currentTitle}
+          </Text>
+          {available && isOnSale && <SaleBadge />}
+          {!available && (
+            <SaleBadge variant="dark" size="xs">
+              {t.unavailable}
+            </SaleBadge>
+          )}
+        </Group>
+        {}
+        <Group gap={8} wrap="nowrap" align="center" style={{ flexShrink: 0 }}>
+          <PriceTagCapsule
+            isDark={isDark}
+            isOnSale={isOnSale}
+            available={available}
+            displayPrice={priceLabel}
+            originalPrice={originalPriceLabel}
+            currencySuffix=""
+          />
+          {available && (
+            <IconChevronDown
+              size={18}
+              stroke={2.2}
+              style={{
+                transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)',
+                transition: 'transform 200ms ease, color 150ms ease',
+                color: expanded
+                  ? (isDark ? '#FFE066' : brandTokens.red)
+                  : (isDark ? '#D4BFA8' : '#5A3A28'),
+                flexShrink: 0,
+              }}
+            />
+          )}
+        </Group>
+      </Group>
+      {/* Expandable details */}
+      <Collapse in={expanded}>
+        <Stack gap="sm" mt="sm" onClick={(e) => e.stopPropagation()}>
+          <Group gap="sm" align="flex-start" wrap="nowrap">
+            <Image
+              src={image}
+              alt={currentTitle}
+              w={104}
+              h={76}
+              radius="md"
+              style={{
+                objectFit: 'cover',
+                flexShrink: 0,
+                border: isDark ? 'none' : '1px solid rgba(0, 0, 0, 0.08)',
+                boxShadow: isDark
+                  ? '0 0 14px rgba(0,0,0,0.6)'
+                  : '0 0 10px rgba(130, 85, 55, 0.1), 0 0 4px rgba(255, 255, 255, 0.8)',
+              }}
+            />
+            <Stack gap={4} style={{ flex: 1, minWidth: 0 }}>
+              {available && isOnSale && (
+                <Box mb={2}>
+                  <SaleBadge />
+                </Box>
+              )}
+              <Text
+                size="xs"
+                style={{
+                  color: isDark ? '#FDF2F0' : '#2A170A',
+                  fontWeight: 500,
+                  lineHeight: 1.6,
+                }}
+              >
+                {currentDesc}
+              </Text>
+            </Stack>
+          </Group>
+          {}
+          <Group gap={6} wrap="wrap">
+            {ALL_SIZES.map((label) => {
+              const sizeObj = sizes.find((s) => s.label === label);
+              return (
+                <SizeButton
+                  key={label}
+                  label={label}
+                  size={sizeObj}
+                  selected={selectedType === 'size' && selectedSize.label === label}
+                  sale={sale}
+                  isDark={isDark}
+                  onClick={() => {
+                    if (sizeObj) {
+                      setSelectedSize(sizeObj);
+                      setSelectedType('size');
+                    }
+                  }}
+                />
+              );
+            })}
+            {perPiece && (
+              <Box
+                onClick={() => setSelectedType('piece')}
+                style={{
+                  ...getNeumorphicChipStyle(isDark, selectedType === 'piece'),
+                  padding: '4px 10px',
+                  borderRadius: 6,
+                  gap: 6,
+                }}
+              >
+                <Text
+                  size="xs"
+                  fw={900}
+                  style={{ color: selectedType === 'piece' ? '#FFFFFF' : isDark ? '#E8A89E' : brandTokens.red }}
+                >
+                  {t.perPieceLabel}
+                </Text>
+                <Group gap={4} align="baseline" wrap="nowrap">
+                  {sale && perPiece.discountedPrice != null && (
+                    <Text
+                      size="10px"
+                      fw={700}
+                      style={{
+                        color: selectedType === 'piece'
+                          ? 'rgba(255, 255, 255, 0.75)'
+                          : isDark
+                            ? 'rgba(255, 255, 255, 0.45)'
+                            : 'rgba(140, 28, 19, 0.55)',
+                        textDecoration: 'line-through',
+                      }}
+                    >
+                      {perPiece.price}
+                    </Text>
+                  )}
+                  <Text
+                    size="xs"
+                    fw={800}
+                    style={{
+                      color: selectedType === 'piece'
+                        ? '#FFE066'
+                        : isDark
+                          ? '#FFE066'
+                          : '#7A1C14',
+                      letterSpacing: '0.02em',
+                    }}
+                  >
+                    {perPiece.discountedPrice != null && sale ? perPiece.discountedPrice : perPiece.price} {t.egp}
+                  </Text>
+                </Group>
+              </Box>
+            )}
+          </Group>
+          {}
+          {isPieceMode && perPiece && (
+            <Group gap="sm" align="center" pt={2}>
+              <Text size="xs" fw={600} style={{ color: isDark ? '#D4BFA8' : '#5A3A28' }}>
+                {t.quantity}:
+              </Text>
+              <Group gap={6} align="center">
+                <Box
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setPieceQty((q) => Math.max(1, q - 1));
+                  }}
+                  style={{
+                    ...getNeumorphicControlStyle(isDark),
+                    width: 24,
+                    height: 24,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    borderRadius: 6,
+                    cursor: pieceQty > 1 ? 'pointer' : 'default',
+                    userSelect: 'none',
+                    opacity: pieceQty > 1 ? 1 : 0.35,
+                  }}
+                >
+                  <IconMinus size={12} stroke={2.5} />
+                </Box>
+                <Text size="xs" fw={800} style={{ minWidth: 20, textAlign: 'center', color: isDark ? '#FFE066' : brandTokens.red }}>
+                  {pieceQty}
+                </Text>
+                <Box
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setPieceQty((q) => q + 1);
+                  }}
+                  style={{
+                    ...getNeumorphicControlStyle(isDark),
+                    width: 24,
+                    height: 24,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    borderRadius: 6,
+                    cursor: 'pointer',
+                    userSelect: 'none',
+                  }}
+                >
+                  <IconPlus size={12} stroke={2.5} />
+                </Box>
+                <Text
+                  size="xs"
+                  fw={900}
+                  style={{
+                    color: isDark ? '#FFE066' : '#7A1C14',
+                    backgroundColor: isDark ? 'rgba(255, 224, 102, 0.15)' : 'rgba(140, 28, 19, 0.08)',
+                    padding: '2px 8px',
+                    borderRadius: 6,
+                    border: isDark ? 'none' : '1px solid rgba(140, 28, 19, 0.15)',
+                    boxShadow: isDark
+                      ? '0 0 6px rgba(0, 0, 0, 0.35)'
+                      : '0 0 6px rgba(130, 85, 55, 0.06), 0 0 4px rgba(255, 255, 255, 0.8)',
+                    marginLeft: 6,
+                  }}
+                >
+                  {t.totalAmount} {currentPieceTotal} {t.egp}
+                </Text>
+              </Group>
+            </Group>
+          )}
+          {}
+          {available && (
+            <Group justify="flex-end" pt={4}>
+              <Button
+                size="xs"
+                radius="md"
+                onClick={handleAddToCart}
+                style={{
+                  fontWeight: 800,
+                  transition: 'background-color 150ms ease, border-color 150ms ease, color 150ms ease',
+                  backgroundColor: added ? '#2f9e44' : brandTokens.red,
+                  color: '#FFFFFF',
+                  boxShadow: added
+                    ? '0 2px 8px rgba(47, 158, 68, 0.3)'
+                    : '0 2px 8px rgba(140, 28, 19, 0.3)',
+                }}
+              >
+                {added ? t.addedToOrder : t.addToOrder}
+              </Button>
+            </Group>
+          )}
+        </Stack>
+      </Collapse>
+    </Box>
+  );
+}
+````
+
 ## File: src/components/TopBar/AdminTopBar.tsx
 ````typescript
 import {
@@ -7424,6 +6465,1054 @@ export function AdminTopBar() {
 }
 ````
 
+## File: src/components/TopBar/TopBar.test.tsx
+````typescript
+import { render, screen, fireEvent } from '@testing-library/react';
+import { describe, it, expect, beforeEach } from 'vitest';
+import { MantineProvider } from '@mantine/core';
+import { MemoryRouter } from 'react-router-dom';
+import { TopBar } from './TopBar';
+import { CartProvider } from '@/context/CartContext';
+import { LanguageProvider } from '@/context/LanguageContext';
+import { theme } from '@/theme';
+describe('TopBar Theme Toggle', () => {
+  beforeEach(() => {
+    const store: Record<string, string> = {};
+    Object.defineProperty(window, 'localStorage', {
+      value: {
+        getItem: (k: string) => store[k] ?? null,
+        setItem: (k: string, v: string) => {
+          store[k] = v;
+        },
+        removeItem: (k: string) => {
+          delete store[k];
+        },
+        clear: () => {
+          for (const k in store) {delete store[k];}
+        },
+      },
+      writable: true,
+    });
+  });
+  it('toggles color scheme attribute and icon seamlessly', () => {
+    render(
+      <MantineProvider theme={theme} defaultColorScheme="light">
+        <LanguageProvider>
+          <CartProvider>
+            <MemoryRouter>
+              <TopBar />
+            </MemoryRouter>
+          </CartProvider>
+        </LanguageProvider>
+      </MantineProvider>
+    );
+    const toggleButton = screen.getByRole('button', { name: /Toggle color scheme|تبديل المظهر/i });
+    expect(toggleButton).toBeDefined();
+    expect(document.documentElement.getAttribute('data-mantine-color-scheme')).toBe('light');
+    fireEvent.click(toggleButton);
+    expect(document.documentElement.getAttribute('data-mantine-color-scheme')).toBe('dark');
+    fireEvent.click(toggleButton);
+    expect(document.documentElement.getAttribute('data-mantine-color-scheme')).toBe('light');
+  });
+});
+````
+
+## File: src/context/CartContext.tsx
+````typescript
+import React, { createContext, useContext, useEffect, useState } from 'react';
+export interface CartItem {
+  id: string;
+  dishId: number;
+  title: string;
+  sizeLabel: string;
+  unitPrice: number;
+  quantity: number;
+  image: string;
+}
+export type OrderType = 'delivery' | 'takeout';
+export interface SupplementaryPreferences {
+  cutlery: boolean;
+  spiceLevel: 'regular' | 'extra' | 'mild';
+  servingStyle?: 'separate' | 'mixed';
+}
+export interface CustomerDetails {
+  name: string;
+  phone: string;
+  address: string;
+  notes: string;
+  orderType: OrderType;
+  preferences?: SupplementaryPreferences;
+}
+interface CartContextType {
+  items: CartItem[];
+  isOpen: boolean;
+  openCart: () => void;
+  closeCart: () => void;
+  toggleCart: () => void;
+  addItem: (item: Omit<CartItem, 'id'>) => void;
+  updateQuantity: (id: string, delta: number) => void;
+  removeItem: (id: string) => void;
+  clearCart: () => void;
+  totalCount: number;
+  totalPrice: number;
+  checkoutWhatsApp: (customer: CustomerDetails) => void;
+}
+const CartContext = createContext<CartContextType | undefined>(undefined);
+const CART_STORAGE_KEY = 'mama-kitchen-cart';
+const WHATSAPP_PHONE = '201554487523';
+export function CartProvider({ children }: { children: React.ReactNode }) {
+  const [items, setItems] = useState<CartItem[]>(() => {
+    try {
+      const saved = localStorage.getItem(CART_STORAGE_KEY);
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [isOpen, setIsOpen] = useState(false);
+  useEffect(() => {
+    try {
+      localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(items));
+    } catch (e) {
+      console.error('Failed to save cart to localStorage', e);
+    }
+  }, [items]);
+  const openCart = () => setIsOpen(true);
+  const closeCart = () => setIsOpen(false);
+  const toggleCart = () => setIsOpen((prev) => !prev);
+  const addItem = (newItem: Omit<CartItem, 'id'>) => {
+    const id = `${newItem.dishId}-${newItem.sizeLabel}`;
+    setItems((prev) => {
+      const existing = prev.find((i) => i.id === id);
+      if (existing) {
+        return prev.map((i) =>
+          i.id === id ? { ...i, quantity: i.quantity + newItem.quantity } : i
+        );
+      }
+      return [...prev, { ...newItem, id }];
+    });
+  };
+  const updateQuantity = (id: string, delta: number) => {
+    setItems((prev) =>
+      prev
+        .map((item) => {
+          if (item.id === id) {
+            const newQty = item.quantity + delta;
+            return newQty > 0 ? { ...item, quantity: newQty } : null;
+          }
+          return item;
+        })
+        .filter((item): item is CartItem => item !== null)
+    );
+  };
+  const removeItem = (id: string) => {
+    setItems((prev) => prev.filter((item) => item.id !== id));
+  };
+  const clearCart = () => {
+    setItems([]);
+  };
+  const totalCount = items.reduce((sum, item) => sum + item.quantity, 0);
+  const totalPrice = items.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
+  const checkoutWhatsApp = (customer: CustomerDetails) => {
+    if (items.length === 0) {return;}
+    const lines: string[] = [
+      '🍽️ *طلب جديد من Mama Kitchen - مطبخ مامي*',
+      '━━━━━━━━━━━━━━━━━━━━',
+    ];
+    const orderTypeLabel = customer.orderType === 'takeout' ? '🏃 *استلام من المطعم (Takeout)*' : '🛵 *توصيل للمنزل (Delivery)*';
+    lines.push(orderTypeLabel);
+    items.forEach((item, index) => {
+      const sizeDisplay = item.sizeLabel === 'Pc' ? 'قطعة' : `حجم ${item.sizeLabel}`;
+      lines.push(
+        `${index + 1}. *${item.title}* (${sizeDisplay})` +
+        `\n   • الكمية: ${item.quantity} × ${item.unitPrice} ج.م = *${item.quantity * item.unitPrice} ج.م*`
+      );
+    });
+    lines.push('━━━━━━━━━━━━━━━━━━━━');
+    lines.push(`💰 *الإجمالي الكلي:* ${totalPrice} ج.م`);
+    lines.push('━━━━━━━━━━━━━━━━━━━━');
+    if (customer.name.trim()) {
+      lines.push(`👤 *الاسم:* ${customer.name.trim()}`);
+    }
+    if (customer.phone.trim()) {
+      lines.push(`📞 *رقم الهاتف:* ${customer.phone.trim()}`);
+    }
+    if (customer.address.trim()) {
+      lines.push(`📍 *العنوان:* ${customer.address.trim()}`);
+    } else if (customer.orderType === 'delivery') {
+      lines.push(`📍 *العنوان:* (لم يُدخل — سيتم التواصل لتحديده)`);
+    }
+    if (customer.preferences) {
+      const spiceMap: Record<string, string> = {
+        regular: 'شطة عادية',
+        extra: 'حارة زيادة 🔥',
+        mild: 'بدون شطة (بارد)',
+      };
+      const servingMap: Record<string, string> = {
+        separate: 'الملاح في علب منفصلة',
+        mixed: 'مفرود فوق الكسرة / القراصة',
+      };
+      lines.push('⚙️ *خيارات وتفضيلات إضافية:*');
+      lines.push(`   • مستوى الشطة: ${spiceMap[customer.preferences.spiceLevel] || 'عادية'}`);
+      if (customer.preferences.servingStyle) {
+        lines.push(`   • طريقة التقديم: ${servingMap[customer.preferences.servingStyle]}`);
+      }
+      lines.push(
+        `   • أدوات المائدة: ${customer.preferences.cutlery ? 'نعم (ملاعق ومناديل)' : 'لا داعي (صديق للبيئة 🌱)'}`
+      );
+    }
+    if (customer.notes.trim()) {
+      lines.push(`📝 *ملاحظات إضافية:* ${customer.notes.trim()}`);
+    }
+    lines.push('\nشكراً لكم! أرجو تأكيد الطلب وسعر التوصيل 🙏');
+    const message = encodeURIComponent(lines.join('\n'));
+    const url = `https://wa.me/${WHATSAPP_PHONE}?text=${message}`;
+    window.open(url, '_blank', 'noopener,noreferrer');
+  };
+  return (
+    <CartContext.Provider
+      value={{
+        items,
+        isOpen,
+        openCart,
+        closeCart,
+        toggleCart,
+        addItem,
+        updateQuantity,
+        removeItem,
+        clearCart,
+        totalCount,
+        totalPrice,
+        checkoutWhatsApp,
+      }}
+    >
+      {children}
+    </CartContext.Provider>
+  );
+}
+export function useCart() {
+  const context = useContext(CartContext);
+  if (!context) {
+    throw new Error('useCart must be used within a CartProvider');
+  }
+  return context;
+}
+````
+
+## File: src/context/LanguageContext.tsx
+````typescript
+import React, { createContext, useContext, useEffect, useState } from 'react';
+import { translations, type Language, type TranslationDictionary } from '@/locales';
+export type { Language, TranslationDictionary };
+export { translations };
+export type Translations = TranslationDictionary;
+interface LanguageContextType {
+  language: Language;
+  direction: 'rtl' | 'ltr';
+  isArabic: boolean;
+  t: TranslationDictionary;
+  toggleLanguage: () => void;
+  setLanguage: (lang: Language) => void;
+}
+const LanguageContext = createContext<LanguageContextType | undefined>(undefined);
+const LANG_STORAGE_KEY = 'mama-kitchen-lang';
+export function LanguageProvider({ children }: { children: React.ReactNode }) {
+  const [language, setLanguageState] = useState<Language>(() => {
+    try {
+      const saved = localStorage.getItem(LANG_STORAGE_KEY);
+      if (saved === 'ar' || saved === 'en') {return saved;}
+      return 'ar';
+    } catch {
+      return 'ar';
+    }
+  });
+  const direction = language === 'ar' ? 'rtl' : 'ltr';
+  useEffect(() => {
+    try {
+      localStorage.setItem(LANG_STORAGE_KEY, language);
+    } catch (e) {
+      console.error('Failed to save language', e);
+    }
+    document.documentElement.dir = direction;
+    document.documentElement.lang = language;
+  }, [language, direction]);
+  const toggleLanguage = () => {
+    setLanguageState((prev) => (prev === 'ar' ? 'en' : 'ar'));
+  };
+  const setLanguage = (lang: Language) => {
+    setLanguageState(lang);
+  };
+  const value: LanguageContextType = {
+    language,
+    direction,
+    isArabic: language === 'ar',
+    t: translations[language],
+    toggleLanguage,
+    setLanguage,
+  };
+  return (
+    <LanguageContext.Provider value={value}>
+      {children}
+    </LanguageContext.Provider>
+  );
+}
+export function useLanguage() {
+  const context = useContext(LanguageContext);
+  if (!context) {
+    throw new Error('useLanguage must be used within a LanguageProvider');
+  }
+  return context;
+}
+````
+
+## File: src/context/MenuContext.tsx
+````typescript
+import React, { createContext, useContext, useEffect, useState } from 'react';
+import { API_ENDPOINTS, type ApiEndpoints } from '@/api/endpoints';
+import initialDishes from '@/data/dishes.json';
+import type { DishCardProps, DishSize, SizeLabel } from '@/components/DishCard';
+export interface DishItem extends DishCardProps {
+  id: number;
+  category: string;
+  storagePath?: string | null;
+}
+export function generateSecureDishId(existingIds: number[] = []): number {
+  const existingSet = new Set(existingIds);
+  const buffer = new Uint32Array(1);
+  let id = 0;
+  do {
+    if (typeof window !== 'undefined' && window.crypto?.getRandomValues) {
+      window.crypto.getRandomValues(buffer);
+      id = 10000000 + (buffer[0] % 90000000);
+    } else {
+      id = Math.floor(10000000 + Math.random() * 90000000);
+    }
+  } while (existingSet.has(id));
+  return id;
+}
+export function compileDishesToJson(dishes: DishItem[]): string {
+  const cleanList = dishes.map((dish) => {
+    const item: Record<string, any> = {
+      id: dish.id,
+      title: dish.title.trim(),
+    };
+    if (dish.title_ar && dish.title_ar.trim()) {
+      item.title_ar = dish.title_ar.trim();
+    }
+    item.description = (dish.description || '').trim();
+    if (dish.description_ar && dish.description_ar.trim()) {
+      item.description_ar = dish.description_ar.trim();
+    }
+    item.image = dish.image || 'maincourse';
+    item.category = dish.category || 'main';
+    item.sale = Boolean(dish.sale);
+    if (dish.available === false) {
+      item.available = false;
+    }
+    item.sizes = (dish.sizes || []).map((s) => {
+      const sizeObj: Record<string, any> = {
+        label: s.label,
+        price: Number(s.price),
+      };
+      if (dish.sale && s.discountedPrice != null && Number(s.discountedPrice) > 0) {
+        sizeObj.discountedPrice = Number(s.discountedPrice);
+      }
+      return sizeObj;
+    });
+    if (dish.perPiece && Number(dish.perPiece.price) > 0) {
+      const pieceObj: Record<string, any> = {
+        price: Number(dish.perPiece.price),
+      };
+      if (dish.sale && dish.perPiece.discountedPrice != null && Number(dish.perPiece.discountedPrice) > 0) {
+        pieceObj.discountedPrice = Number(dish.perPiece.discountedPrice);
+      }
+      item.perPiece = pieceObj;
+    }
+    return item;
+  });
+  return JSON.stringify(cleanList, null, 2);
+}
+interface MenuContextType {
+  dishes: DishItem[];
+  endpoints: ApiEndpoints;
+  toggleAvailability: (id: number) => void;
+  toggleSale: (id: number) => void;
+  updateDish: (id: number, updated: Partial<DishItem>) => void;
+  addDish: (newDish: Omit<DishItem, 'id'> & { id?: number }) => number;
+  deleteDish: (id: number) => void;
+  duplicateDish: (id: number) => number;
+  generateSecureId: () => number;
+  resetMenu: () => void;
+  compileServerJson: () => string;
+  uploadImage: (id: number, file: File) => Promise<void>;
+  deleteImage: (id: number) => Promise<void>;
+}
+const MenuContext = createContext<MenuContextType | undefined>(undefined);
+const MENU_STORAGE_KEY = 'mama-kitchen-menu-state-v1';
+export function MenuProvider({ children }: { children: React.ReactNode }) {
+  const [dishes, setDishes] = useState<DishItem[]>(() => {
+    try {
+      const saved = localStorage.getItem(MENU_STORAGE_KEY);
+      if (saved) {
+        return JSON.parse(saved);
+      }
+    } catch (e) {
+      console.error('Failed to load menu overrides', e);
+    }
+    return initialDishes as unknown as DishItem[];
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem(MENU_STORAGE_KEY, JSON.stringify(dishes));
+    } catch (e) {
+      console.error('Failed to save menu state', e);
+    }
+  }, [dishes]);
+  useEffect(() => {
+    let cancelled = false;
+    fetch(API_ENDPOINTS.PUBLIC_MENU)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { dishes?: DishItem[] } | null) => {
+        if (!cancelled && data?.dishes && Array.isArray(data.dishes) && data.dishes.length > 0) {
+          setDishes(data.dishes);
+        }
+      })
+      .catch(() => {
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const syncRequest = (method: 'POST' | 'PATCH' | 'DELETE', body?: unknown, query = '') => {
+    fetch(`${API_ENDPOINTS.PUBLIC_MENU}${query}`, {
+      method,
+      headers: body ? { 'Content-Type': 'application/json' } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+      credentials: 'same-origin',
+    }).catch((err) => console.error('Failed to sync menu change:', err));
+  };
+  const toggleAvailability = (id: number) => {
+    const target = dishes.find((d) => d.id === id);
+    const nextAvailable = target?.available === false;
+    setDishes((prev) =>
+      prev.map((dish) => (dish.id === id ? { ...dish, available: nextAvailable } : dish))
+    );
+    syncRequest('PATCH', { id, updated: { available: nextAvailable } });
+  };
+  const toggleSale = (id: number) => {
+    const target = dishes.find((d) => d.id === id);
+    const nextSale = !target?.sale;
+    setDishes((prev) =>
+      prev.map((dish) => (dish.id === id ? { ...dish, sale: nextSale } : dish))
+    );
+    syncRequest('PATCH', { id, updated: { sale: nextSale } });
+  };
+  const updateDish = (id: number, updated: Partial<DishItem>) => {
+    setDishes((prev) =>
+      prev.map((dish) => (dish.id === id ? { ...dish, ...updated } : dish))
+    );
+    syncRequest('PATCH', { id, updated });
+  };
+  const uploadImage = async (id: number, file: File): Promise<void> => {
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('productId', String(id));
+      const response = await fetch('/api/admin/image', {
+        method: 'POST',
+        body: formData,
+        credentials: 'same-origin',
+      });
+      if (!response.ok) {
+        const data = (await response.json()).catch(() => ({}));
+        throw new Error(data.error || `Upload failed (${response.status})`);
+      }
+      const { publicUrl, storagePath } = (await response.json()) as {
+        publicUrl: string;
+        storagePath: string;
+      };
+      setDishes((prev) =>
+        prev.map((dish) =>
+          dish.id === id
+            ? {
+                ...dish,
+                image: storagePath,
+                uploadedDataUrl: publicUrl,
+                storagePath,
+              }
+            : dish
+        )
+      );
+      syncRequest('PATCH', { id, updated: { image: storagePath, uploadedDataUrl: publicUrl } });
+    } catch (err) {
+      console.error('Failed to upload image:', err);
+    }
+  };
+  const deleteImage = async (id: number): Promise<void> => {
+    try {
+      const dish = dishes.find((d) => d.id === id);
+      if (!dish?.storagePath) {return;}
+      await fetch(`/api/admin/image?path=${encodeURIComponent(dish.storagePath)}`, {
+        method: 'DELETE',
+        credentials: 'same-origin',
+      });
+      setDishes((prev) =>
+        prev.map((dish) =>
+          dish.id === id
+            ? { ...dish, uploadedDataUrl: undefined, image: 'maincourse', storagePath: null }
+            : dish
+        )
+      );
+      syncRequest('PATCH', { id, updated: { image: 'maincourse', uploadedDataUrl: undefined } });
+    } catch (err) {
+      console.error('Failed to delete image:', err);
+    }
+  };
+  const addDish = (newDish: Omit<DishItem, 'id'> & { id?: number }): number => {
+    const id = newDish.id ?? generateSecureDishId(dishes.map((d) => d.id));
+    const dishWithId: DishItem = {
+      ...newDish,
+      id,
+    };
+    setDishes((prev) => [dishWithId, ...prev]);
+    syncRequest('POST', { dish: dishWithId });
+    return id;
+  };
+  const deleteDish = (id: number) => {
+    setDishes((prev) => prev.filter((d) => d.id !== id));
+    syncRequest('DELETE', undefined, `?id=${id}`);
+  };
+  const duplicateDish = (id: number): number => {
+    const target = dishes.find((d) => d.id === id);
+    if (!target) {return -1;}
+    const nextId = generateSecureDishId(dishes.map((d) => d.id));
+    let newImage = target.image;
+    if (target.image && (target.image.startsWith(`${target.id}.`) || target.image === String(target.id))) {
+      const ext = target.image.includes('.') ? target.image.split('.').pop() : 'jpg';
+      newImage = `${nextId}.${ext}`;
+    }
+    const cloned: DishItem = {
+      ...target,
+      id: nextId,
+      image: newImage,
+      title: `${target.title} (Copy)`,
+      title_ar: target.title_ar ? `${target.title_ar} (نسخة)` : undefined,
+    };
+    setDishes((prev) => [cloned, ...prev]);
+    syncRequest('POST', { dish: cloned });
+    return nextId;
+  };
+  const generateSecureId = () => generateSecureDishId(dishes.map((d) => d.id));
+  const resetMenu = () => {
+    setDishes(initialDishes as unknown as DishItem[]);
+    localStorage.removeItem(MENU_STORAGE_KEY);
+    syncRequest('DELETE', undefined, '?reset=true');
+  };
+  const compileServerJson = () => compileDishesToJson(dishes);
+  return (
+    <MenuContext.Provider
+      value={{
+        dishes,
+        endpoints: API_ENDPOINTS,
+        toggleAvailability,
+        toggleSale,
+        updateDish,
+        addDish,
+        deleteDish,
+        duplicateDish,
+        generateSecureId,
+        resetMenu,
+        compileServerJson,
+        uploadImage,
+        deleteImage,
+      }}
+    >
+      {children}
+    </MenuContext.Provider>
+  );
+}
+export function useMenu() {
+  const context = useContext(MenuContext);
+  if (!context) {
+    throw new Error('useMenu must be used within a MenuProvider');
+  }
+  return context;
+}
+````
+
+## File: src/pages/Dashboard/Dashboard.page.tsx
+````typescript
+import React, { useState } from 'react';
+import {
+  IconCheck,
+  IconCode,
+  IconCopy,
+  IconDownload,
+  IconPlus,
+  IconToolsKitchen2,
+} from '@tabler/icons-react';
+import {
+  Badge,
+  Button,
+  Group,
+  Paper,
+  SegmentedControl,
+  SimpleGrid,
+  Stack,
+  Text,
+  TextInput,
+  Title,
+  useComputedColorScheme,
+} from '@mantine/core';
+import type { DishSize, SizeLabel } from '@/components/DishCard';
+import { useLanguage } from '@/context/LanguageContext';
+import { useMenu, type DishItem } from '@/context/MenuContext';
+import { brandTokens } from '@/styles/neumorphic';
+import { DEFAULT_FORM, type DishFormData } from './dashboard.types';
+import { DashboardDishCard } from './components/DashboardDishCard';
+import { DashboardDishModal } from './components/DashboardDishModal';
+import { DashboardJsonDrawer } from './components/DashboardJsonDrawer';
+import { DashboardStats } from './components/DashboardStats';
+export function DashboardPage() {
+  const { t, isArabic } = useLanguage();
+  const {
+    dishes,
+    endpoints,
+    toggleAvailability,
+    updateDish,
+    addDish,
+    deleteDish,
+    duplicateDish,
+    generateSecureId,
+    resetMenu,
+    compileServerJson,
+    uploadImage,
+    deleteImage,
+  } = useMenu();
+  const computedColorScheme = useComputedColorScheme('light', { getInitialValueInEffect: false });
+  const isDark = computedColorScheme === 'dark';
+  const [search, setSearch] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [showJsonPreview, setShowJsonPreview] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editingDishId, setEditingDishId] = useState<number | null>(null);
+  const [formData, setFormData] = useState<DishFormData>(DEFAULT_FORM);
+  const compiledJson = compileServerJson();
+  const handleCopyJson = () => {
+    navigator.clipboard.writeText(compiledJson);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+  const handleDownloadJson = () => {
+    const blob = new Blob([compiledJson], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'dishes.json';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+  const handleOpenAdd = () => {
+    setEditingDishId(null);
+    const newId = generateSecureId();
+    setFormData({
+      ...DEFAULT_FORM,
+      id: newId,
+      image: `${newId}.jpg`,
+      imageExtension: 'jpg',
+    });
+    setModalOpen(true);
+  };
+  const handleOpenEdit = (dish: DishItem) => {
+    setEditingDishId(dish.id);
+    const sObj = (dish.sizes || []).find((s) => s.label === 'S');
+    const mObj = (dish.sizes || []).find((s) => s.label === 'M');
+    const lObj = (dish.sizes || []).find((s) => s.label === 'L');
+    let ext = 'jpg';
+    if (dish.image && dish.image.includes('.')) {
+      ext = dish.image.split('.').pop() || 'jpg';
+    }
+    setFormData({
+      id: dish.id,
+      title: dish.title,
+      title_ar: dish.title_ar || '',
+      description: dish.description,
+      description_ar: dish.description_ar || '',
+      category: dish.category || 'main',
+      image: dish.image || 'maincourse',
+      uploadedDataUrl: dish.uploadedDataUrl,
+      imageExtension: ext,
+      sale: Boolean(dish.sale),
+      available: dish.available !== false,
+      sizes: {
+        S: {
+          enabled: !!sObj,
+          price: sObj ? sObj.price : 150,
+          discountedPrice: sObj?.discountedPrice,
+        },
+        M: {
+          enabled: !!mObj,
+          price: mObj ? mObj.price : 220,
+          discountedPrice: mObj?.discountedPrice,
+        },
+        L: {
+          enabled: !!lObj,
+          price: lObj ? lObj.price : 320,
+          discountedPrice: lObj?.discountedPrice,
+        },
+      },
+      hasPerPiece: !!dish.perPiece,
+      perPiecePrice: dish.perPiece ? dish.perPiece.price : 35,
+      perPieceDiscounted: dish.perPiece?.discountedPrice,
+    });
+    setModalOpen(true);
+  };
+  const handleRandomizeId = () => {
+    const newId = generateSecureId();
+    setFormData((prev) => {
+      let newImage = prev.image;
+      if (
+        prev.uploadedDataUrl ||
+        (prev.image && (prev.image.includes('.') || prev.image === String(prev.id)))
+      ) {
+        const ext =
+          prev.imageExtension || (prev.image.includes('.') ? prev.image.split('.').pop() : 'jpg');
+        newImage = `${newId}.${ext}`;
+      }
+      return {
+        ...prev,
+        id: newId,
+        image: newImage,
+      };
+    });
+  };
+  const handleImageUpload = (file: File | null) => {
+    if (!file) {return;}
+    uploadImage(formData.id ?? generateSecureId(), file).catch(() => {
+    });
+  };
+  const handleRemoveImage = async () => {
+    if (!formData.id) {return;}
+    await deleteImage(formData.id);
+    setFormData((prev) => ({
+      ...prev,
+      image: 'maincourse',
+      uploadedDataUrl: undefined,
+    }));
+  };
+  const handleDownloadPicture = () => {
+    if (!formData.uploadedDataUrl) {return;}
+    const filename = formData.image || `${formData.id || 'dish'}.jpg`;
+    const a = document.createElement('a');
+    a.href = formData.uploadedDataUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+  const sizeErrors: Partial<Record<SizeLabel, string>> = {};
+  if (formData.sale) {
+    (['S', 'M', 'L'] as SizeLabel[]).forEach((lbl) => {
+      const cfg = formData.sizes[lbl];
+      if (
+        cfg?.enabled &&
+        cfg.discountedPrice != null &&
+        Number(cfg.discountedPrice) >= Number(cfg.price)
+      ) {
+        sizeErrors[lbl] = `${t.discountPriceError} (< ${cfg.price} ${t.egp})`;
+      }
+    });
+  }
+  const perPieceError =
+    formData.sale &&
+    formData.hasPerPiece &&
+    formData.perPieceDiscounted != null &&
+    Number(formData.perPieceDiscounted) >= Number(formData.perPiecePrice)
+      ? `${t.discountPriceError} (< ${formData.perPiecePrice} ${t.egp})`
+      : undefined;
+  const hasPriceErrors = Object.keys(sizeErrors).length > 0 || !!perPieceError;
+  const handleSaveDish = () => {
+    if (!formData.title.trim() || hasPriceErrors) {return;}
+    const sizes: DishSize[] = [];
+    (['S', 'M', 'L'] as SizeLabel[]).forEach((lbl) => {
+      const cfg = formData.sizes[lbl];
+      if (cfg?.enabled) {
+        sizes.push({
+          label: lbl,
+          price: Number(cfg.price) || 0,
+          discountedPrice:
+            formData.sale && cfg.discountedPrice != null ? Number(cfg.discountedPrice) : undefined,
+        });
+      }
+    });
+    if (sizes.length === 0) {
+      sizes.push({ label: 'S', price: 100 });
+    }
+    const finalId = formData.id ?? generateSecureId();
+    const dishPayload: DishItem = {
+      id: finalId,
+      title: formData.title.trim(),
+      title_ar: formData.title_ar.trim() || undefined,
+      description: formData.description.trim(),
+      description_ar: formData.description_ar.trim() || undefined,
+      category: formData.category,
+      image: formData.image || 'maincourse',
+      uploadedDataUrl: formData.uploadedDataUrl,
+      sale: formData.sale,
+      available: formData.available,
+      sizes,
+      perPiece: formData.hasPerPiece
+        ? {
+            price: Number(formData.perPiecePrice) || 0,
+            discountedPrice:
+              formData.sale && formData.perPieceDiscounted != null
+                ? Number(formData.perPieceDiscounted)
+                : undefined,
+          }
+        : undefined,
+    };
+    if (editingDishId != null) {
+      updateDish(editingDishId, dishPayload);
+    } else {
+      addDish(dishPayload);
+    }
+    setModalOpen(false);
+  };
+  const filteredDishes = dishes.filter((dish) => {
+    const matchesSearch =
+      dish.title.toLowerCase().includes(search.toLowerCase()) ||
+      (dish.title_ar && dish.title_ar.includes(search)) ||
+      String(dish.id).includes(search);
+    const matchesCategory = categoryFilter === 'all' || dish.category === categoryFilter;
+    let matchesStatus = true;
+    if (statusFilter === 'available') {matchesStatus = dish.available !== false;}
+    if (statusFilter === 'unavailable') {matchesStatus = dish.available === false;}
+    if (statusFilter === 'sale') {matchesStatus = Boolean(dish.sale);}
+    return matchesSearch && matchesCategory && matchesStatus;
+  });
+  const onSaleCount = dishes.filter((d) => d.sale).length;
+  const outOfStockCount = dishes.filter((d) => d.available === false).length;
+  return (
+    <Stack gap="xl" p="xl" maw={1200} mx="auto" w="100%">
+      {}
+      <Group justify="space-between" align="flex-start" wrap="wrap" gap="md">
+        <div>
+          <Group gap="xs" align="center">
+            <Title order={2} style={{ color: isDark ? '#E8A89E' : brandTokens.red }}>
+              <Group gap={8} align="center" style={{ display: 'inline-flex' }}>
+                <IconToolsKitchen2 size={26} stroke={1.8} style={{ flexShrink: 0 }} />
+                {t.menuEditor}
+              </Group>
+            </Title>
+            <Badge color="brand" variant="light" size="sm" radius="sm">
+              API: {endpoints.ADMIN_MENU}
+            </Badge>
+          </Group>
+          <Text size="sm" c="dimmed" mt={4} maw={600}>
+            {t.menuEditorSubtitle}
+          </Text>
+        </div>
+        <Group gap="xs" wrap="wrap">
+          <Button
+            leftSection={<IconPlus size={16} stroke={2.5} />}
+            color="brand"
+            radius="md"
+            onClick={handleOpenAdd}
+          >
+            {t.addNewDish}
+          </Button>
+          <Button
+            variant={showJsonPreview ? 'filled' : 'light'}
+            color="brand"
+            radius="md"
+            leftSection={<IconCode size={16} stroke={2} />}
+            onClick={() => setShowJsonPreview((v) => !v)}
+          >
+            {showJsonPreview ? t.hideJson : t.showJson}
+          </Button>
+          <Button
+            variant="default"
+            radius="md"
+            leftSection={
+              copied ? <IconCheck size={16} stroke={2.5} /> : <IconCopy size={16} stroke={2} />
+            }
+            onClick={handleCopyJson}
+            color={copied ? 'green' : undefined}
+          >
+            {copied ? t.copied : t.copyJson}
+          </Button>
+          <Button
+            variant="default"
+            radius="md"
+            leftSection={<IconDownload size={16} stroke={2} />}
+            onClick={handleDownloadJson}
+          >
+            {t.downloadJson}
+          </Button>
+          <Button
+            variant="subtle"
+            color="gray"
+            size="sm"
+            onClick={() => {
+              if (
+                window.confirm(
+                  isArabic ? 'هل تريد إعادة ضبط القائمة للافتراضي؟' : 'Reset to default menu?'
+                )
+              ) {
+                resetMenu();
+              }
+            }}
+          >
+            {t.resetToDefault}
+          </Button>
+        </Group>
+      </Group>
+      {}
+      <DashboardStats
+        totalDishes={dishes.length}
+        inStockCount={dishes.length - outOfStockCount}
+        outOfStockCount={outOfStockCount}
+        onSaleCount={onSaleCount}
+        isDark={isDark}
+      />
+      {}
+      <DashboardJsonDrawer
+        show={showJsonPreview}
+        isDark={isDark}
+        compiledJson={compiledJson}
+        adminMenuEndpoint={endpoints.ADMIN_MENU}
+        totalDishes={dishes.length}
+        copied={copied}
+        onCopy={handleCopyJson}
+        onDownload={handleDownloadJson}
+      />
+      {}
+      <Paper withBorder p="md" radius="lg">
+        <Group justify="space-between" wrap="wrap" gap="md">
+          <TextInput
+            placeholder={t.searchDishes}
+            value={search}
+            onChange={(e) => setSearch(e.currentTarget.value)}
+            style={{ flex: 1, minWidth: 220 }}
+            radius="md"
+          />
+          <Group gap="xs" wrap="wrap">
+            <SegmentedControl
+              size="xs"
+              radius="md"
+              value={categoryFilter}
+              onChange={setCategoryFilter}
+              data={[
+                { label: t.allCategories, value: 'all' },
+                { label: t.mains, value: 'main' },
+                { label: t.stews, value: 'stew' },
+                { label: t.salads, value: 'salad' },
+                { label: t.sides, value: 'side' },
+              ]}
+            />
+            <SegmentedControl
+              size="xs"
+              radius="md"
+              value={statusFilter}
+              onChange={setStatusFilter}
+              data={[
+                { label: isArabic ? 'الكل' : 'All', value: 'all' },
+                { label: t.inStock, value: 'available' },
+                { label: t.outOfStock, value: 'unavailable' },
+                { label: t.sale, value: 'sale' },
+              ]}
+            />
+          </Group>
+        </Group>
+      </Paper>
+      {}
+      <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="md">
+        {filteredDishes.map((dish) => (
+          <DashboardDishCard
+            key={dish.id}
+            dish={dish}
+            onToggleAvailability={toggleAvailability}
+            onEdit={handleOpenEdit}
+            onDuplicate={duplicateDish}
+            onDelete={deleteDish}
+          />
+        ))}
+      </SimpleGrid>
+      {}
+      <DashboardDishModal
+        opened={modalOpen}
+        onClose={() => setModalOpen(false)}
+        editingDishId={editingDishId}
+        formData={formData}
+        setFormData={setFormData}
+        onSave={handleSaveDish}
+        onRandomizeId={handleRandomizeId}
+        onImageUpload={handleImageUpload}
+        onRemoveImage={handleRemoveImage}
+        onDownloadPicture={handleDownloadPicture}
+        sizeErrors={sizeErrors}
+        perPieceError={perPieceError}
+        hasPriceErrors={hasPriceErrors}
+        isDark={isDark}
+      />
+    </Stack>
+  );
+}
+````
+
+## File: src/pages/Dashboard/dashboard.types.ts
+````typescript
+import type { SizeLabel } from '@/components/DishCard';
+export interface SizeConfig {
+  enabled: boolean;
+  price: number;
+  discountedPrice?: number;
+}
+export interface DishFormData {
+  id?: number;
+  title: string;
+  title_ar: string;
+  description: string;
+  description_ar: string;
+  category: string;
+  image: string;
+  uploadedDataUrl?: string;
+  imageExtension?: string;
+  storagePath?: string;
+  sale: boolean;
+  available: boolean;
+  sizes: {
+    S?: SizeConfig;
+    M?: SizeConfig;
+    L?: SizeConfig;
+  };
+  hasPerPiece: boolean;
+  perPiecePrice: number;
+  perPieceDiscounted?: number;
+}
+export const DEFAULT_FORM: DishFormData = {
+  title: '',
+  title_ar: '',
+  description: '',
+  description_ar: '',
+  category: 'main',
+  image: 'maincourse',
+  sale: false,
+  available: true,
+  sizes: {
+    S: { enabled: true, price: 150 },
+    M: { enabled: false, price: 200 },
+    L: { enabled: false, price: 280 },
+  },
+  hasPerPiece: false,
+  perPiecePrice: 35,
+};
+````
+
 ## File: src/Router.tsx
 ````typescript
 import { createBrowserRouter, Outlet, RouterProvider } from 'react-router-dom';
@@ -7531,6 +7620,196 @@ const router = createBrowserRouter([
 ]);
 export function Router() {
   return <RouterProvider router={router} />;
+}
+````
+
+## File: src/theme-integration.test.tsx
+````typescript
+import { render, screen, fireEvent, act } from '@testing-library/react';
+import { describe, it, expect, beforeEach } from 'vitest';
+import App from './App';
+import { AdminTopBar } from './components/TopBar/AdminTopBar';
+import { MantineProvider } from '@mantine/core';
+import { LanguageProvider } from './context/LanguageContext';
+import { BrowserRouter } from 'react-router-dom';
+import { theme } from './theme';
+import { createUnifiedColorSchemeManager } from './App';
+describe('Theme System Integration', () => {
+  let store: Record<string, string> = {};
+  beforeEach(() => {
+    store = {};
+    Object.defineProperty(window, 'localStorage', {
+      value: {
+        getItem: (k: string) => store[k] ?? null,
+        setItem: (k: string, v: string) => {
+          store[k] = v;
+        },
+        removeItem: (k: string) => {
+          delete store[k];
+        },
+        clear: () => {
+          for (const k in store) {delete store[k];}
+        },
+      },
+      writable: true,
+    });
+    document.documentElement.removeAttribute('data-mantine-color-scheme');
+  });
+  it('loads dark mode when stored in mantine-color-scheme-value', () => {
+    store['mantine-color-scheme-value'] = 'dark';
+    render(<App />);
+    expect(document.documentElement.getAttribute('data-mantine-color-scheme')).toBe('dark');
+  });
+  it('loads dark mode when stored in mama-kitchen-color-scheme', () => {
+    store['mama-kitchen-color-scheme'] = 'dark';
+    render(<App />);
+    expect(document.documentElement.getAttribute('data-mantine-color-scheme')).toBe('dark');
+  });
+  it('cycles from light to dark and back to light cleanly on storefront TopBar', () => {
+    render(<App />);
+    const themeBtn = screen.getByRole('button', { name: /Toggle color scheme|تبديل المظهر/i });
+    act(() => {
+      fireEvent.click(themeBtn);
+    });
+    expect(document.documentElement.getAttribute('data-mantine-color-scheme')).toBe('dark');
+    expect(store['mantine-color-scheme-value']).toBe('dark');
+    expect(store['mama-kitchen-color-scheme']).toBe('dark');
+    act(() => {
+      fireEvent.click(themeBtn);
+    });
+    expect(document.documentElement.getAttribute('data-mantine-color-scheme')).toBe('light');
+    expect(store['mantine-color-scheme-value']).toBe('light');
+    expect(store['mama-kitchen-color-scheme']).toBe('light');
+  });
+  it('toggles theme properly in AdminTopBar and synchronizes both storage keys', () => {
+    render(
+      <MantineProvider theme={theme} colorSchemeManager={createUnifiedColorSchemeManager()} defaultColorScheme="light">
+        <LanguageProvider>
+          <BrowserRouter>
+            <AdminTopBar />
+          </BrowserRouter>
+        </LanguageProvider>
+      </MantineProvider>
+    );
+    const themeBtn = screen.getByRole('button', { name: /Toggle color scheme|تبديل المظهر/i });
+    act(() => {
+      fireEvent.click(themeBtn);
+    });
+    expect(document.documentElement.getAttribute('data-mantine-color-scheme')).toBe('dark');
+    expect(store['mantine-color-scheme-value']).toBe('dark');
+    expect(store['mama-kitchen-color-scheme']).toBe('dark');
+    act(() => {
+      fireEvent.click(themeBtn);
+    });
+    expect(document.documentElement.getAttribute('data-mantine-color-scheme')).toBe('light');
+    expect(store['mantine-color-scheme-value']).toBe('light');
+    expect(store['mama-kitchen-color-scheme']).toBe('light');
+  });
+});
+````
+
+## File: src/utils/orderValidation.ts
+````typescript
+export const ARABIC_LETTERS = '\u0621-\u064A\u064B-\u065F\u0671-\u06D3';
+export const ARABIC_NUMERALS = '\u0660-\u0669\u06F0-\u06F9';
+export function normalizeArabicNumerals(input: string): string {
+  if (!input) {return '';}
+  return input
+    .replace(/[\u0660-\u0669]/g, (c) => String(c.charCodeAt(0) - 0x0660))
+    .replace(/[\u06F0-\u06F9]/g, (c) => String(c.charCodeAt(0) - 0x06F0));
+}
+// Name regex: Arabic and Latin letters, spaces, hyphens, apostrophes (2 to 60 characters).
+// Numbers (both Western 0-9 and Arabic ٠-٩) and punctuation are strictly disallowed.
+export const NAME_REGEX = new RegExp(
+  `^[${ARABIC_LETTERS}A-Za-z][${ARABIC_LETTERS}A-Za-z\\s'-]{1,59}$`
+);
+// Phone regex (operates on normalized digits):
+// Egyptian mobiles: 01[0125]xxxxxxxx (11 digits), or with +20 / 0020 prefix
+// Sudanese mobiles: 09xxxxxxxx or 01[012]xxxxxxx (10 digits), or with +249 / 00249 prefix
+export const PHONE_REGEX =
+  /^(?:(?:(?:\+20|0020)?0?1[0125]\d{8})|(?:(?:\+249|00249)?(?:0?9\d{8}|0?1[012]\d{7})))$/;
+// Delivery Address regex:
+// 6 to 150 characters, letters (Arabic & English), numbers (Arabic ٠-٩ & Western 0-9), spaces,
+// and address punctuation (including Arabic comma ، \u060C, periods, slashes, hyphens, hashes)
+export const ADDRESS_REGEX = new RegExp(
+  `^[${ARABIC_LETTERS}A-Za-z0-9${ARABIC_NUMERALS}\\s,،./#\\-–]{6,150}$`
+);
+// Address must contain at least 2 actual letters (Arabic or English), not just digits
+export const ADDRESS_HAS_LETTERS_REGEX = new RegExp(`[${ARABIC_LETTERS}A-Za-z]{2,}`);
+export interface ValidationResult {
+  isValid: boolean;
+  nameError?: string;
+  phoneError?: string;
+  addressError?: string;
+}
+export interface ValidateOrderParams {
+  name: string;
+  phone: string;
+  address: string;
+  orderType: 'delivery' | 'takeout';
+  t: {
+    nameErrorEmpty: string;
+    nameErrorInvalid: string;
+    phoneErrorEmpty: string;
+    phoneErrorInvalid: string;
+    addressErrorEmpty: string;
+    addressErrorInvalid: string;
+  };
+}
+export function validateCustomerName(
+  name: string,
+  t: { nameErrorEmpty: string; nameErrorInvalid: string }
+): string | undefined {
+  const trimmed = name.trim();
+  if (!trimmed) {
+    return t.nameErrorEmpty;
+  }
+  if (!NAME_REGEX.test(trimmed)) {
+    return t.nameErrorInvalid;
+  }
+  return undefined;
+}
+export function validateCustomerPhone(
+  phone: string,
+  t: { phoneErrorEmpty: string; phoneErrorInvalid: string }
+): string | undefined {
+  const normalized = normalizeArabicNumerals(phone).replace(/[\s\-()]/g, '');
+  if (!normalized) {
+    return t.phoneErrorEmpty;
+  }
+  if (!PHONE_REGEX.test(normalized)) {
+    return t.phoneErrorInvalid;
+  }
+  return undefined;
+}
+export function validateCustomerAddress(
+  address: string,
+  orderType: 'delivery' | 'takeout',
+  t: { addressErrorEmpty: string; addressErrorInvalid: string }
+): string | undefined {
+  if (orderType === 'takeout') {
+    return undefined;
+  }
+  const trimmed = address.trim();
+  if (!trimmed) {
+    return t.addressErrorEmpty;
+  }
+  if (!ADDRESS_REGEX.test(trimmed) || !ADDRESS_HAS_LETTERS_REGEX.test(trimmed)) {
+    return t.addressErrorInvalid;
+  }
+  return undefined;
+}
+export function validateOrderDetails(params: ValidateOrderParams): ValidationResult {
+  const nameError = validateCustomerName(params.name, params.t);
+  const phoneError = validateCustomerPhone(params.phone, params.t);
+  const addressError = validateCustomerAddress(params.address, params.orderType, params.t);
+  const isValid = !nameError && !phoneError && !addressError;
+  return {
+    isValid,
+    nameError,
+    phoneError,
+    addressError,
+  };
 }
 ````
 
