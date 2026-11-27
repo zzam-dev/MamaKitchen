@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { API_ENDPOINTS, type ApiEndpoints } from '@/api/endpoints';
-import initialDishes from '@/data/dishes.json';
 import type { DishCardProps } from '@/components/DishCard';
+import initialDishes from '@/data/dishes.json';
+import { API_ENDPOINTS, type ApiEndpoints } from '../../api/endpoints';
 
 export interface DishItem extends DishCardProps {
   id: number;
@@ -57,7 +57,11 @@ export function compileDishesToJson(dishes: DishItem[]): string {
       const pieceObj: Record<string, any> = {
         price: Number(dish.perPiece.price),
       };
-      if (dish.sale && dish.perPiece.discountedPrice != null && Number(dish.perPiece.discountedPrice) > 0) {
+      if (
+        dish.sale &&
+        dish.perPiece.discountedPrice != null &&
+        Number(dish.perPiece.discountedPrice) > 0
+      ) {
         pieceObj.discountedPrice = Number(dish.perPiece.discountedPrice);
       }
       item.perPiece = pieceObj;
@@ -117,7 +121,9 @@ export function MenuProvider({ children }: { children: React.ReactNode }) {
       })
       .catch((err) => console.error('Failed to load menu:', err))
       .finally(() => {
-        if (!cancelled) {setLoading(false);}
+        if (!cancelled) {
+          setLoading(false);
+        }
       });
     return () => {
       cancelled = true;
@@ -145,16 +151,12 @@ export function MenuProvider({ children }: { children: React.ReactNode }) {
   const toggleSale = (id: number) => {
     const target = dishes.find((d) => d.id === id);
     const nextSale = !target?.sale;
-    setDishes((prev) =>
-      prev.map((dish) => (dish.id === id ? { ...dish, sale: nextSale } : dish))
-    );
+    setDishes((prev) => prev.map((dish) => (dish.id === id ? { ...dish, sale: nextSale } : dish)));
     syncRequest('PATCH', { id, updated: { sale: nextSale } });
   };
 
   const updateDish = (id: number, updated: Partial<DishItem>) => {
-    setDishes((prev) =>
-      prev.map((dish) => (dish.id === id ? { ...dish, ...updated } : dish))
-    );
+    setDishes((prev) => prev.map((dish) => (dish.id === id ? { ...dish, ...updated } : dish)));
     syncRequest('PATCH', { id, updated });
   };
 
@@ -201,7 +203,9 @@ export function MenuProvider({ children }: { children: React.ReactNode }) {
   const deleteImage = async (id: number): Promise<void> => {
     try {
       const dish = dishes.find((d) => d.id === id);
-      if (!dish?.storagePath) {return;}
+      if (!dish?.storagePath) {
+        return;
+      }
       await fetch(`/api/admin/image?path=${encodeURIComponent(dish.storagePath)}`, {
         method: 'DELETE',
         credentials: 'same-origin',
@@ -242,10 +246,15 @@ export function MenuProvider({ children }: { children: React.ReactNode }) {
 
   const duplicateDish = (id: number): number => {
     const target = dishes.find((d) => d.id === id);
-    if (!target) {return -1;}
+    if (!target) {
+      return -1;
+    }
     const nextId = generateSecureDishId(dishes.map((d) => d.id));
     let newImage = target.image;
-    if (target.image && (target.image.startsWith(`${target.id}.`) || target.image === String(target.id))) {
+    if (
+      target.image &&
+      (target.image.startsWith(`${target.id}.`) || target.image === String(target.id))
+    ) {
       const ext = target.image.includes('.') ? target.image.split('.').pop() : 'jpg';
       newImage = `${nextId}.${ext}`;
     }
