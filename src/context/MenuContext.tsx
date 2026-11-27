@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { API_ENDPOINTS, type ApiEndpoints } from '@/api/endpoints';
 import initialDishes from '@/data/dishes.json';
-import type { DishCardProps, DishSize, SizeLabel } from '@/components/DishCard';
+import type { DishCardProps } from '@/components/DishCard';
 
 export interface DishItem extends DishCardProps {
   id: number;
@@ -9,10 +9,6 @@ export interface DishItem extends DishCardProps {
   storagePath?: string | null;
 }
 
-/**
- * Generates a cryptographically secure random positive integer for product IDs.
- * Uses window.crypto.getRandomValues (Web Crypto API) ensuring unguessable, collision-free IDs.
- */
 export function generateSecureDishId(existingIds: number[] = []): number {
   const existingSet = new Set(existingIds);
   const buffer = new Uint32Array(1);
@@ -20,7 +16,6 @@ export function generateSecureDishId(existingIds: number[] = []): number {
   do {
     if (typeof window !== 'undefined' && window.crypto?.getRandomValues) {
       window.crypto.getRandomValues(buffer);
-      // Generate 8-digit secure integer [10_000_000 - 99_999_999]
       id = 10000000 + (buffer[0] % 90000000);
     } else {
       id = Math.floor(10000000 + Math.random() * 90000000);
@@ -35,25 +30,19 @@ export function compileDishesToJson(dishes: DishItem[]): string {
       id: dish.id,
       title: dish.title.trim(),
     };
-
     if (dish.title_ar && dish.title_ar.trim()) {
       item.title_ar = dish.title_ar.trim();
     }
-
     item.description = (dish.description || '').trim();
-
     if (dish.description_ar && dish.description_ar.trim()) {
       item.description_ar = dish.description_ar.trim();
     }
-
     item.image = dish.image || 'maincourse';
     item.category = dish.category || 'main';
     item.sale = Boolean(dish.sale);
-
     if (dish.available === false) {
       item.available = false;
     }
-
     item.sizes = (dish.sizes || []).map((s) => {
       const sizeObj: Record<string, any> = {
         label: s.label,
@@ -64,7 +53,6 @@ export function compileDishesToJson(dishes: DishItem[]): string {
       }
       return sizeObj;
     });
-
     if (dish.perPiece && Number(dish.perPiece.price) > 0) {
       const pieceObj: Record<string, any> = {
         price: Number(dish.perPiece.price),
@@ -74,15 +62,14 @@ export function compileDishesToJson(dishes: DishItem[]): string {
       }
       item.perPiece = pieceObj;
     }
-
     return item;
   });
-
   return JSON.stringify(cleanList, null, 2);
 }
 
 interface MenuContextType {
   dishes: DishItem[];
+  loading: boolean;
   endpoints: ApiEndpoints;
   toggleAvailability: (id: number) => void;
   toggleSale: (id: number) => void;
@@ -99,41 +86,38 @@ interface MenuContextType {
 
 const MenuContext = createContext<MenuContextType | undefined>(undefined);
 
-const MENU_STORAGE_KEY = 'mama-kitchen-menu-state-v1';
+// Old browser cache of the menu. No longer used: Supabase is the source of truth.
+// Kept only so we can clear stale copies left in visitors' browsers.
+const LEGACY_MENU_STORAGE_KEY = 'mama-kitchen-menu-state-v1';
 
 export function MenuProvider({ children }: { children: React.ReactNode }) {
-  const [dishes, setDishes] = useState<DishItem[]>(() => {
-    try {
-      const saved = localStorage.getItem(MENU_STORAGE_KEY);
-      if (saved) {
-        return JSON.parse(saved);
-      }
-    } catch (e) {
-      console.error('Failed to load menu overrides', e);
-    }
-    return initialDishes as unknown as DishItem[];
-  });
+  // Supabase is the only source of truth: start empty and fill from the API.
+  const [dishes, setDishes] = useState<DishItem[]>([]);
+  const [loading, setLoading] = useState(true);
 
+  // One-time cleanup of the old localStorage menu cache.
   useEffect(() => {
     try {
-      localStorage.setItem(MENU_STORAGE_KEY, JSON.stringify(dishes));
-    } catch (e) {
-      console.error('Failed to save menu state', e);
+      localStorage.removeItem(LEGACY_MENU_STORAGE_KEY);
+    } catch {
+      // storage unavailable (private mode, etc.) - nothing to clean
     }
-  }, [dishes]);
+  }, []);
 
-  // Fetch live menu from Supabase via /api/menu on mount
+  // Load the live menu from Supabase via /api/menu.
   useEffect(() => {
     let cancelled = false;
     fetch(API_ENDPOINTS.PUBLIC_MENU)
       .then((res) => (res.ok ? res.json() : null))
       .then((data: { dishes?: DishItem[] } | null) => {
-        if (!cancelled && data?.dishes && Array.isArray(data.dishes) && data.dishes.length > 0) {
+        // An empty array is valid: an empty table means an empty menu.
+        if (!cancelled && data?.dishes && Array.isArray(data.dishes)) {
           setDishes(data.dishes);
         }
       })
-      .catch(() => {
-        // Offline or local dev without Vercel API — keep localStorage/initialDishes fallback
+      .catch((err) => console.error('Failed to load menu:', err))
+      .finally(() => {
+        if (!cancelled) {setLoading(false);}
       });
     return () => {
       cancelled = true;
@@ -174,29 +158,24 @@ export function MenuProvider({ children }: { children: React.ReactNode }) {
     syncRequest('PATCH', { id, updated });
   };
 
-  // Upload dish image to Supabase Storage bucket "Product Images"
   const uploadImage = async (id: number, file: File): Promise<void> => {
     try {
       const formData = new FormData();
       formData.append('file', file);
       formData.append('productId', String(id));
-
       const response = await fetch('/api/admin/image', {
         method: 'POST',
         body: formData,
-        credentials: 'same-origin', // send admin session cookie
+        credentials: 'same-origin',
       });
-
       if (!response.ok) {
-        const data = (await response.json()).catch(() => ({}));
+        const data = (await response.json().catch(() => ({}))) as { error?: string };
         throw new Error(data.error || `Upload failed (${response.status})`);
       }
-
       const { publicUrl, storagePath } = (await response.json()) as {
         publicUrl: string;
         storagePath: string;
       };
-
       setDishes((prev) =>
         prev.map((dish) =>
           dish.id === id
@@ -209,9 +188,11 @@ export function MenuProvider({ children }: { children: React.ReactNode }) {
             : dish
         )
       );
-
-      // Persist storage path back to the dishes table via existing admin menu endpoint
-      syncRequest('PATCH', { id, updated: { image: storagePath, uploadedDataUrl: publicUrl } });
+      // storagePath is saved too, so the image can still be deleted after a page reload
+      syncRequest('PATCH', {
+        id,
+        updated: { image: storagePath, uploadedDataUrl: publicUrl, storagePath },
+      });
     } catch (err) {
       console.error('Failed to upload image:', err);
     }
@@ -221,21 +202,23 @@ export function MenuProvider({ children }: { children: React.ReactNode }) {
     try {
       const dish = dishes.find((d) => d.id === id);
       if (!dish?.storagePath) {return;}
-
       await fetch(`/api/admin/image?path=${encodeURIComponent(dish.storagePath)}`, {
         method: 'DELETE',
         credentials: 'same-origin',
       });
-
       setDishes((prev) =>
-        prev.map((dish) =>
-          dish.id === id
-            ? { ...dish, uploadedDataUrl: undefined, image: 'maincourse', storagePath: null }
-            : dish
+        prev.map((d) =>
+          d.id === id
+            ? { ...d, uploadedDataUrl: undefined, image: 'maincourse', storagePath: null }
+            : d
         )
       );
-
-      syncRequest('PATCH', { id, updated: { image: 'maincourse', uploadedDataUrl: undefined } });
+      // null (not undefined) so the fields are actually cleared in the database;
+      // undefined would be dropped by JSON.stringify and the old values would stay.
+      syncRequest('PATCH', {
+        id,
+        updated: { image: 'maincourse', uploadedDataUrl: null, storagePath: null },
+      });
     } catch (err) {
       console.error('Failed to delete image:', err);
     }
@@ -261,14 +244,11 @@ export function MenuProvider({ children }: { children: React.ReactNode }) {
     const target = dishes.find((d) => d.id === id);
     if (!target) {return -1;}
     const nextId = generateSecureDishId(dishes.map((d) => d.id));
-
-    // If target image is named after product ID, update the cloned image name to the new product ID
     let newImage = target.image;
     if (target.image && (target.image.startsWith(`${target.id}.`) || target.image === String(target.id))) {
       const ext = target.image.includes('.') ? target.image.split('.').pop() : 'jpg';
       newImage = `${nextId}.${ext}`;
     }
-
     const cloned: DishItem = {
       ...target,
       id: nextId,
@@ -285,7 +265,6 @@ export function MenuProvider({ children }: { children: React.ReactNode }) {
 
   const resetMenu = () => {
     setDishes(initialDishes as unknown as DishItem[]);
-    localStorage.removeItem(MENU_STORAGE_KEY);
     syncRequest('DELETE', undefined, '?reset=true');
   };
 
@@ -295,6 +274,7 @@ export function MenuProvider({ children }: { children: React.ReactNode }) {
     <MenuContext.Provider
       value={{
         dishes,
+        loading,
         endpoints: API_ENDPOINTS,
         toggleAvailability,
         toggleSale,
@@ -321,4 +301,3 @@ export function useMenu() {
   }
   return context;
 }
-

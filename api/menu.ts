@@ -151,19 +151,8 @@ export default async function handler(req: Request): Promise<Response> {
     if (error) {
       return json({ error: error.message }, 500);
     }
-    if (!data || data.length === 0) {
-      const seedRows = (initialDishes as unknown as ClientDish[]).map(toDbRow);
-      const { data: seeded, error: seedError } = await supabase
-        .from('dishes')
-        .upsert(seedRows, { onConflict: 'id' })
-        .select('*')
-        .order('id', { ascending: true });
-      if (seedError) {
-        return json({ error: seedError.message }, 500);
-      }
-      return json({ dishes: (seeded as DbDishRow[]).map(toClientDish) });
-    }
-    return json({ dishes: (data as DbDishRow[]).map(toClientDish) });
+    // An empty table stays empty: no automatic seeding.
+    return json({ dishes: ((data ?? []) as DbDishRow[]).map(toClientDish) });
   }
 
   // ── Everything below requires admin ───────────────────────────────────────
