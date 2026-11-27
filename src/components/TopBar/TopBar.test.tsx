@@ -20,7 +20,7 @@ describe('TopBar Theme Toggle', () => {
           delete store[k];
         },
         clear: () => {
-          for (const k in store) delete store[k];
+          for (const k in store) {delete store[k];}
         },
       },
       writable: true,

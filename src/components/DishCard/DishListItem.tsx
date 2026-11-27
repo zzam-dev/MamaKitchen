@@ -147,7 +147,7 @@ export function DishListItem({
 
   const handleAddToCart = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!available) return;
+    if (!available) {return;}
 
     const unitPrice = isPieceMode
       ? (sale && perPiece?.discountedPrice != null ? perPiece.discountedPrice : perPiece?.price ?? 0)

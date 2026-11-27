@@ -48,6 +48,8 @@ export function DashboardPage() {
     generateSecureId,
     resetMenu,
     compileServerJson,
+    uploadImage,
+    deleteImage,
   } = useMenu();
   const computedColorScheme = useComputedColorScheme('light', { getInitialValueInEffect: false });
   const isDark = computedColorScheme === 'dark';
@@ -169,26 +171,15 @@ export function DashboardPage() {
 
   // Handle image upload and ID picture the same as product ID
   const handleImageUpload = (file: File | null) => {
-    if (!file) return;
-    const parts = file.name.split('.');
-    const ext = parts.length > 1 ? parts.pop()!.toLowerCase() : 'jpg';
-    const currentId = formData.id ?? generateSecureId();
-
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = reader.result as string;
-      setFormData((prev) => ({
-        ...prev,
-        id: currentId,
-        image: `${currentId}.${ext}`,
-        uploadedDataUrl: dataUrl,
-        imageExtension: ext,
-      }));
-    };
-    reader.readAsDataURL(file);
+    if (!file) {return;}
+    uploadImage(formData.id ?? generateSecureId(), file).catch(() => {
+      // errors are logged inside uploadImage itself
+    });
   };
 
-  const handleRemoveImage = () => {
+  const handleRemoveImage = async () => {
+    if (!formData.id) {return;}
+    await deleteImage(formData.id);
     setFormData((prev) => ({
       ...prev,
       image: 'maincourse',
@@ -197,7 +188,7 @@ export function DashboardPage() {
   };
 
   const handleDownloadPicture = () => {
-    if (!formData.uploadedDataUrl) return;
+    if (!formData.uploadedDataUrl) {return;}
     const filename = formData.image || `${formData.id || 'dish'}.jpg`;
     const a = document.createElement('a');
     a.href = formData.uploadedDataUrl;
@@ -234,7 +225,7 @@ export function DashboardPage() {
 
   // Save dish
   const handleSaveDish = () => {
-    if (!formData.title.trim() || hasPriceErrors) return;
+    if (!formData.title.trim() || hasPriceErrors) {return;}
 
     const sizes: DishSize[] = [];
     (['S', 'M', 'L'] as SizeLabel[]).forEach((lbl) => {
@@ -297,9 +288,9 @@ export function DashboardPage() {
     const matchesCategory = categoryFilter === 'all' || dish.category === categoryFilter;
 
     let matchesStatus = true;
-    if (statusFilter === 'available') matchesStatus = dish.available !== false;
-    if (statusFilter === 'unavailable') matchesStatus = dish.available === false;
-    if (statusFilter === 'sale') matchesStatus = Boolean(dish.sale);
+    if (statusFilter === 'available') {matchesStatus = dish.available !== false;}
+    if (statusFilter === 'unavailable') {matchesStatus = dish.available === false;}
+    if (statusFilter === 'sale') {matchesStatus = Boolean(dish.sale);}
 
     return matchesSearch && matchesCategory && matchesStatus;
   });

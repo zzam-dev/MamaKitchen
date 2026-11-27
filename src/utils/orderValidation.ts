@@ -15,7 +15,7 @@ export const ARABIC_NUMERALS = '\u0660-\u0669\u06F0-\u06F9';
  * Normalizes Eastern Arabic-Indic numerals (٠-٩) and Persian numerals (۰-۹) to standard Western digits (0-9).
  */
 export function normalizeArabicNumerals(input: string): string {
-  if (!input) return '';
+  if (!input) {return '';}
   return input
     .replace(/[\u0660-\u0669]/g, (c) => String(c.charCodeAt(0) - 0x0660))
     .replace(/[\u06F0-\u06F9]/g, (c) => String(c.charCodeAt(0) - 0x06F0));

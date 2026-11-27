@@ -6,6 +6,7 @@ import type { DishCardProps, DishSize, SizeLabel } from '@/components/DishCard';
 export interface DishItem extends DishCardProps {
   id: number;
   category: string;
+  storagePath?: string | null;
 }
 
 /**
@@ -92,6 +93,8 @@ interface MenuContextType {
   generateSecureId: () => number;
   resetMenu: () => void;
   compileServerJson: () => string;
+  uploadImage: (id: number, file: File) => Promise<void>;
+  deleteImage: (id: number) => Promise<void>;
 }
 
 const MenuContext = createContext<MenuContextType | undefined>(undefined);
@@ -119,24 +122,123 @@ export function MenuProvider({ children }: { children: React.ReactNode }) {
     }
   }, [dishes]);
 
+  // Fetch live menu from Supabase via /api/menu on mount
+  useEffect(() => {
+    let cancelled = false;
+    fetch(API_ENDPOINTS.PUBLIC_MENU)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { dishes?: DishItem[] } | null) => {
+        if (!cancelled && data?.dishes && Array.isArray(data.dishes) && data.dishes.length > 0) {
+          setDishes(data.dishes);
+        }
+      })
+      .catch(() => {
+        // Offline or local dev without Vercel API — keep localStorage/initialDishes fallback
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const syncRequest = (method: 'POST' | 'PATCH' | 'DELETE', body?: unknown, query = '') => {
+    fetch(`${API_ENDPOINTS.PUBLIC_MENU}${query}`, {
+      method,
+      headers: body ? { 'Content-Type': 'application/json' } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+      credentials: 'same-origin',
+    }).catch((err) => console.error('Failed to sync menu change:', err));
+  };
+
   const toggleAvailability = (id: number) => {
+    const target = dishes.find((d) => d.id === id);
+    const nextAvailable = target?.available === false;
     setDishes((prev) =>
-      prev.map((dish) =>
-        dish.id === id ? { ...dish, available: dish.available === false ? true : false } : dish
-      )
+      prev.map((dish) => (dish.id === id ? { ...dish, available: nextAvailable } : dish))
     );
+    syncRequest('PATCH', { id, updated: { available: nextAvailable } });
   };
 
   const toggleSale = (id: number) => {
+    const target = dishes.find((d) => d.id === id);
+    const nextSale = !target?.sale;
     setDishes((prev) =>
-      prev.map((dish) => (dish.id === id ? { ...dish, sale: !dish.sale } : dish))
+      prev.map((dish) => (dish.id === id ? { ...dish, sale: nextSale } : dish))
     );
+    syncRequest('PATCH', { id, updated: { sale: nextSale } });
   };
 
   const updateDish = (id: number, updated: Partial<DishItem>) => {
     setDishes((prev) =>
       prev.map((dish) => (dish.id === id ? { ...dish, ...updated } : dish))
     );
+    syncRequest('PATCH', { id, updated });
+  };
+
+  // Upload dish image to Supabase Storage bucket "Product Images"
+  const uploadImage = async (id: number, file: File): Promise<void> => {
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('productId', String(id));
+
+      const response = await fetch('/api/admin/image', {
+        method: 'POST',
+        body: formData,
+        credentials: 'same-origin', // send admin session cookie
+      });
+
+      if (!response.ok) {
+        const data = (await response.json()).catch(() => ({}));
+        throw new Error(data.error || `Upload failed (${response.status})`);
+      }
+
+      const { publicUrl, storagePath } = (await response.json()) as {
+        publicUrl: string;
+        storagePath: string;
+      };
+
+      setDishes((prev) =>
+        prev.map((dish) =>
+          dish.id === id
+            ? {
+                ...dish,
+                image: storagePath,
+                uploadedDataUrl: publicUrl,
+                storagePath,
+              }
+            : dish
+        )
+      );
+
+      // Persist storage path back to the dishes table via existing admin menu endpoint
+      syncRequest('PATCH', { id, updated: { image: storagePath, uploadedDataUrl: publicUrl } });
+    } catch (err) {
+      console.error('Failed to upload image:', err);
+    }
+  };
+
+  const deleteImage = async (id: number): Promise<void> => {
+    try {
+      const dish = dishes.find((d) => d.id === id);
+      if (!dish?.storagePath) {return;}
+
+      await fetch(`/api/admin/image?path=${encodeURIComponent(dish.storagePath)}`, {
+        method: 'DELETE',
+        credentials: 'same-origin',
+      });
+
+      setDishes((prev) =>
+        prev.map((dish) =>
+          dish.id === id
+            ? { ...dish, uploadedDataUrl: undefined, image: 'maincourse', storagePath: null }
+            : dish
+        )
+      );
+
+      syncRequest('PATCH', { id, updated: { image: 'maincourse', uploadedDataUrl: undefined } });
+    } catch (err) {
+      console.error('Failed to delete image:', err);
+    }
   };
 
   const addDish = (newDish: Omit<DishItem, 'id'> & { id?: number }): number => {
@@ -146,16 +248,18 @@ export function MenuProvider({ children }: { children: React.ReactNode }) {
       id,
     };
     setDishes((prev) => [dishWithId, ...prev]);
+    syncRequest('POST', { dish: dishWithId });
     return id;
   };
 
   const deleteDish = (id: number) => {
     setDishes((prev) => prev.filter((d) => d.id !== id));
+    syncRequest('DELETE', undefined, `?id=${id}`);
   };
 
   const duplicateDish = (id: number): number => {
     const target = dishes.find((d) => d.id === id);
-    if (!target) return -1;
+    if (!target) {return -1;}
     const nextId = generateSecureDishId(dishes.map((d) => d.id));
 
     // If target image is named after product ID, update the cloned image name to the new product ID
@@ -173,6 +277,7 @@ export function MenuProvider({ children }: { children: React.ReactNode }) {
       title_ar: target.title_ar ? `${target.title_ar} (نسخة)` : undefined,
     };
     setDishes((prev) => [cloned, ...prev]);
+    syncRequest('POST', { dish: cloned });
     return nextId;
   };
 
@@ -181,6 +286,7 @@ export function MenuProvider({ children }: { children: React.ReactNode }) {
   const resetMenu = () => {
     setDishes(initialDishes as unknown as DishItem[]);
     localStorage.removeItem(MENU_STORAGE_KEY);
+    syncRequest('DELETE', undefined, '?reset=true');
   };
 
   const compileServerJson = () => compileDishesToJson(dishes);
@@ -199,6 +305,8 @@ export function MenuProvider({ children }: { children: React.ReactNode }) {
         generateSecureId,
         resetMenu,
         compileServerJson,
+        uploadImage,
+        deleteImage,
       }}
     >
       {children}

@@ -109,7 +109,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const totalPrice = items.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
 
   const checkoutWhatsApp = (customer: CustomerDetails) => {
-    if (items.length === 0) return;
+    if (items.length === 0) {return;}
 
     const lines: string[] = [
       '🍽️ *طلب جديد من Mama Kitchen - مطبخ مامي*',

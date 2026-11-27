@@ -171,7 +171,7 @@ export function DishDetailModal({
           <Group gap={8} wrap="wrap">
             {ALL_SIZES.map((label) => {
               const sizeObj = sizes.find((s) => s.label === label);
-              if (!sizeObj) return null;
+              if (!sizeObj) {return null;}
               const isSelected = selectedType === 'size' && selectedSize.label === label;
               const hasDiscount = Boolean(sale && sizeObj.discountedPrice != null);
               const displayP = hasDiscount ? sizeObj.discountedPrice! : sizeObj.price;

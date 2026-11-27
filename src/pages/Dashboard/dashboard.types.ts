@@ -16,6 +16,7 @@ export interface DishFormData {
   image: string;
   uploadedDataUrl?: string;
   imageExtension?: string;
+  storagePath?: string;
   sale: boolean;
   available: boolean;
   sizes: {

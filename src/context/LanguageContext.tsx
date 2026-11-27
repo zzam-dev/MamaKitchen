@@ -23,7 +23,7 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
   const [language, setLanguageState] = useState<Language>(() => {
     try {
       const saved = localStorage.getItem(LANG_STORAGE_KEY);
-      if (saved === 'ar' || saved === 'en') return saved;
+      if (saved === 'ar' || saved === 'en') {return saved;}
       return 'ar'; // Default to Arabic as Mama Kitchen is an authentic Sudanese kitchen
     } catch {
       return 'ar';

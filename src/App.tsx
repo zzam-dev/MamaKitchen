@@ -10,12 +10,12 @@ import { theme } from './theme';
 export function createUnifiedColorSchemeManager(): MantineColorSchemeManager {
   return {
     get: (defaultValue: MantineColorScheme) => {
-      if (typeof window === 'undefined') return defaultValue;
+      if (typeof window === 'undefined') {return defaultValue;}
       try {
         const val =
           localStorage.getItem('mantine-color-scheme-value') ||
           localStorage.getItem('mama-kitchen-color-scheme');
-        if (val === 'dark' || val === 'light' || val === 'auto') return val;
+        if (val === 'dark' || val === 'light' || val === 'auto') {return val;}
         return defaultValue;
       } catch {
         return defaultValue;

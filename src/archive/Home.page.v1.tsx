@@ -9,7 +9,7 @@ export function HomePage() {
   const { hovered, ref } = useHover();
   return (
     <>
-      <Card w={280} shadow="sm" withBorder radius={'lg'} ref={ref}>
+      <Card w={280} shadow="sm" withBorder radius="lg" ref={ref}>
         <CardSection>
           <Image height={160} src={image} alt="Norway" />
         </CardSection>

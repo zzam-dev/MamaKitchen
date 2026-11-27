@@ -48,7 +48,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
         await supabase.from('products').delete().neq('id', 0);
         const { error } = await supabase.from('products').insert(products);
 
-        if (error) throw error;
+        if (error) {throw error;}
 
         return res.status(200).json({ success: true, message: 'Inventory updated instantly!' });
     } catch (err) {

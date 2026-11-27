@@ -62,8 +62,8 @@ export function DishCard({
     : null;
 
   const handleQuickAddToCart = (e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
-    if (!available) return;
+    if (e) {e.stopPropagation();}
+    if (!available) {return;}
 
     addItem({
       dishId: id ?? Math.floor(Math.random() * 100000),
@@ -79,7 +79,7 @@ export function DishCard({
   };
 
   const handleModalAddToCart = (selection: { sizeLabel: string; unitPrice: number; quantity: number }) => {
-    if (!available) return;
+    if (!available) {return;}
     addItem({
       dishId: id ?? Math.floor(Math.random() * 100000),
       title: currentTitle,
