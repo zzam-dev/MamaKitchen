@@ -11,6 +11,7 @@
   - [ ] Add item quantities / stock tracking.
   - [ ] Verify order integrity before checkout.
   - [ ] Explore non-WhatsApp ordering alternatives.
+  - [ ] Add error messages.
 
 ## 🎨 UI & Code Quality
 

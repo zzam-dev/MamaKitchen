@@ -165,7 +165,7 @@ export function MenuProvider({ children }: { children: React.ReactNode }) {
       const formData = new FormData();
       formData.append('file', file);
       formData.append('productId', String(id));
-      const response = await fetch('/api/admin/image', {
+      const response = await fetch('/api/image', {
         method: 'POST',
         body: formData,
         credentials: 'same-origin',

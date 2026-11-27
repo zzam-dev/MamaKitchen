@@ -49,6 +49,7 @@ The content is organized as follows:
 .stylelintrc.json
 api/_lib/supabase.ts
 api/admin-auth.ts
+api/endpoints.ts
 api/image.ts
 api/menu.ts
 eslint.config.js
@@ -60,10 +61,6 @@ postcss.config.cjs
 public/favicon.svg
 README.md
 renovate.json
-src/api/_lib/supabase.ts
-src/api/endpoints.ts
-src/api/image.ts
-src/api/menu.ts
 src/App.tsx
 src/archive/Home.page.v1.tsx
 src/assets/images/agashi.jpg
@@ -482,6 +479,15 @@ export default async function handler(req: Request): Promise<Response> {
 }
 ````
 
+## File: api/endpoints.ts
+````typescript
+export const API_ENDPOINTS = {
+  PUBLIC_MENU: '/api/menu',
+  ADMIN_MENU: '/api/admin/menu',
+} as const;
+export type ApiEndpoints = typeof API_ENDPOINTS;
+````
+
 ## File: LICENSE
 ````
 MIT License
@@ -651,358 +657,6 @@ After running `bun run build`, the `dist/` folder contains your production-ready
   ],
   "prHourlyLimit": 0,
   "prConcurrentLimit": 0
-}
-````
-
-## File: src/api/_lib/supabase.ts
-````typescript
-import { createClient } from '@supabase/supabase-js';
-const supabaseUrl = process.env.SUPABASE_URL || '';
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-export const supabase = createClient(supabaseUrl, supabaseServiceKey);
-export const STORAGE_BUCKET = 'Product Images';
-export async function uploadProductImage(productId: number, file: File): Promise<string | null> {
-  const ext = file.name.split('.').pop() ?? 'jpg';
-  const path = `${productId}.${ext}`;
-  const { error } = await supabase.storage.from(STORAGE_BUCKET).upload(path, file, { upsert: true });
-  if (error) { throw error; }
-  const { data } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(path);
-  return data.publicUrl;
-}
-export async function deleteProductImage(path: string): Promise<void> {
-  await supabase.storage.from(STORAGE_BUCKET).remove([path]);
-}
-````
-
-## File: src/api/endpoints.ts
-````typescript
-export const API_ENDPOINTS = {
-  PUBLIC_MENU: '/api/menu',
-  ADMIN_MENU: '/api/admin/menu',
-} as const;
-export type ApiEndpoints = typeof API_ENDPOINTS;
-````
-
-## File: src/api/image.ts
-````typescript
-import { createClient } from '@supabase/supabase-js';
-export const config = { runtime: 'edge' };
-const SESSION_PAYLOAD = 'mama_kitchen_admin_session_v1';
-const COOKIE_NAME = 'mama_admin_session';
-const STORAGE_BUCKET = 'Product Images';
-function parseCookies(cookieHeader: string): Record<string, string> {
-  return Object.fromEntries(
-    cookieHeader
-      .split(';')
-      .map((c) => c.trim().split('='))
-      .filter(([k]) => k)
-      .map(([k, ...v]) => [k.trim(), v.join('=').trim()])
-  );
-}
-function safeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) {return false;}
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) {
-    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  }
-  return diff === 0;
-}
-async function isAdminAuthorized(req: Request): Promise<boolean> {
-  const cookies = parseCookies(req.headers.get('cookie') ?? '');
-  const token = cookies[COOKIE_NAME];
-  if (!token) {return false;}
-  const secret =
-    process.env.SESSION_SECRET ||
-    (process.env.ADMIN_PASS ? `session_${process.env.ADMIN_PASS}` : 'mama_kitchen_default_session_secret_2026');
-  const encoder = new TextEncoder();
-  const key = await crypto.subtle.importKey(
-    'raw',
-    encoder.encode(secret),
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign']
-  );
-  const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(SESSION_PAYLOAD));
-  const expected = Array.from(new Uint8Array(signature))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
-  return safeEqual(token, expected);
-}
-function json(data: unknown, status = 200): Response {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { 'Content-Type': 'application/json' },
-  });
-}
-export default async function handler(req: Request): Promise<Response> {
-  if (req.method !== 'POST' && req.method !== 'DELETE') {
-    return new Response('Method not allowed', { status: 405 });
-  }
-  if (!(await isAdminAuthorized(req))) {
-    return new Response('Unauthorized', { status: 401 });
-  }
-  const supabaseUrl = process.env.SUPABASE_URL ?? '';
-  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
-  const supabase = createClient(supabaseUrl, supabaseServiceKey);
-  // ── POST: upload ──────────────────────────────────────────────────────────
-  if (req.method === 'POST') {
-    try {
-      const formData = await req.formData();
-      const file = formData.get('file') as File | null;
-      const productId = formData.get('productId') as string | null;
-      if (!file || !productId) {
-        return new Response('Missing file or productId', { status: 400 });
-      }
-      const ext = file.name.split('.').pop() ?? 'jpg';
-      const path = `${productId}.${ext}`;
-      const { error } = await supabase.storage.from(STORAGE_BUCKET).upload(path, file, {
-        upsert: true,
-      });
-      if (error) {throw error;}
-      const { data } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(path);
-      return json({ publicUrl: data?.publicUrl ?? '', storagePath: path });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'An unknown error occurred';
-      return json({ error: message }, 500);
-    }
-  }
-  try {
-    const url = new URL(req.url);
-    const path = url.searchParams.get('path') ?? '';
-    if (!path) {
-      return new Response('Missing path parameter', { status: 400 });
-    }
-    const { error } = await supabase.storage.from(STORAGE_BUCKET).remove([path]);
-    if (error) {throw error;}
-    return json({ success: true });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : 'An unknown error occurred';
-    return json({ error: message }, 500);
-  }
-}
-````
-
-## File: src/api/menu.ts
-````typescript
-import { createClient } from '@supabase/supabase-js';
-import initialDishes from '../src/data/dishes.json';
-export const config = { runtime: 'edge' };
-const SESSION_PAYLOAD = 'mama_kitchen_admin_session_v1';
-const COOKIE_NAME = 'mama_admin_session';
-interface DbDishRow {
-  id: number;
-  title: string;
-  title_ar: string;
-  description: string;
-  description_ar: string;
-  image: string;
-  uploadedDataUrl?: string | null;
-  category: string;
-  sale: boolean;
-  available: boolean;
-  sizes: Array<{ label: string; price: number; discountedPrice?: number }>;
-  perPiecePrice?: number | null;
-  perPieceDiscountedPrice?: number | null;
-  storage_path?: string | null;
-}
-interface ClientDish {
-  id: number;
-  title: string;
-  title_ar?: string;
-  description: string;
-  description_ar?: string;
-  image: string;
-  uploadedDataUrl?: string;
-  category: string;
-  sale: boolean;
-  available?: boolean;
-  sizes: Array<{ label: string; price: number; discountedPrice?: number }>;
-  perPiece?: { price: number; discountedPrice?: number };
-  storagePath?: string | null;
-}
-function toDbRow(dish: ClientDish): DbDishRow {
-  return {
-    id: dish.id,
-    title: dish.title,
-    title_ar: dish.title_ar ?? '',
-    description: dish.description ?? '',
-    description_ar: dish.description_ar ?? '',
-    image: dish.image ?? 'maincourse',
-    uploadedDataUrl: dish.uploadedDataUrl ?? null,
-    category: dish.category ?? 'main',
-    sale: Boolean(dish.sale),
-    available: dish.available !== false,
-    sizes: dish.sizes ?? [],
-    perPiecePrice: dish.perPiece?.price ?? null,
-    perPieceDiscountedPrice: dish.perPiece?.discountedPrice ?? null,
-    storage_path: dish.storagePath ?? null,
-  };
-}
-function toClientDish(row: DbDishRow): ClientDish {
-  const dish: ClientDish = {
-    id: row.id,
-    title: row.title,
-    title_ar: row.title_ar || undefined,
-    description: row.description,
-    description_ar: row.description_ar || undefined,
-    image: row.image,
-    category: row.category,
-    sale: row.sale,
-    available: row.available,
-    sizes: row.sizes ?? [],
-    storagePath: row.storage_path ?? undefined,
-  };
-  if (row.uploadedDataUrl) {
-    dish.uploadedDataUrl = row.uploadedDataUrl;
-  }
-  if (row.perPiecePrice != null && Number(row.perPiecePrice) > 0) {
-    dish.perPiece = {
-      price: Number(row.perPiecePrice),
-      ...(row.perPieceDiscountedPrice != null && Number(row.perPieceDiscountedPrice) > 0
-        ? { discountedPrice: Number(row.perPieceDiscountedPrice) }
-        : {}),
-    };
-  }
-  return dish;
-}
-function parseCookies(cookieHeader: string): Record<string, string> {
-  return Object.fromEntries(
-    cookieHeader
-      .split(';')
-      .map((c) => c.trim().split('='))
-      .filter(([k]) => k)
-      .map(([k, ...v]) => [k.trim(), v.join('=').trim()])
-  );
-}
-function safeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) {return false;}
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) {
-    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  }
-  return diff === 0;
-}
-async function isAdminAuthorized(req: Request): Promise<boolean> {
-  const cookies = parseCookies(req.headers.get('cookie') ?? '');
-  const token = cookies[COOKIE_NAME];
-  if (!token) {return false;}
-  const secret =
-    process.env.SESSION_SECRET ||
-    (process.env.ADMIN_PASS ? `session_${process.env.ADMIN_PASS}` : 'mama_kitchen_default_session_secret_2026');
-  const encoder = new TextEncoder();
-  const key = await crypto.subtle.importKey(
-    'raw',
-    encoder.encode(secret),
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign']
-  );
-  const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(SESSION_PAYLOAD));
-  const expected = Array.from(new Uint8Array(signature))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
-  return safeEqual(token, expected);
-}
-function json(data: unknown, status = 200): Response {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { 'Content-Type': 'application/json' },
-  });
-}
-export default async function handler(req: Request): Promise<Response> {
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!supabaseUrl || !supabaseKey) {
-    return json({ error: 'Supabase environment variables are not configured.' }, 500);
-  }
-  const supabase = createClient(supabaseUrl, supabaseKey);
-  if (req.method === 'GET') {
-    const { data, error } = await supabase
-      .from('dishes')
-      .select('*')
-      .order('id', { ascending: true });
-    if (error) {
-      return json({ error: error.message }, 500);
-    }
-    if (!data || data.length === 0) {
-      const seedRows = (initialDishes as unknown as ClientDish[]).map(toDbRow);
-      const { data: seeded, error: seedError } = await supabase
-        .from('dishes')
-        .upsert(seedRows, { onConflict: 'id' })
-        .select('*')
-        .order('id', { ascending: true });
-      if (seedError) {
-        return json({ error: seedError.message }, 500);
-      }
-      return json({ dishes: (seeded as DbDishRow[]).map(toClientDish) });
-    }
-    return json({ dishes: (data as DbDishRow[]).map(toClientDish) });
-  }
-  if (!(await isAdminAuthorized(req))) {
-    return json({ error: 'Unauthorized' }, 401);
-  }
-  if (req.method === 'POST') {
-    const body = (await req.json()) as { dish?: ClientDish; dishes?: ClientDish[] };
-    const items = body.dishes ?? (body.dish ? [body.dish] : []);
-    if (items.length === 0) {
-      return json({ error: 'Missing dish payload' }, 400);
-    }
-    const { error } = await supabase
-      .from('dishes')
-      .upsert(items.map(toDbRow), { onConflict: 'id' });
-    if (error) {
-      return json({ error: error.message }, 500);
-    }
-    return json({ success: true });
-  }
-  if (req.method === 'PATCH') {
-    const body = (await req.json()) as { id?: number; updated?: Partial<ClientDish> };
-    if (!body.id || !body.updated) {
-      return json({ error: 'Missing id or updated fields' }, 400);
-    }
-    const { data: existing, error: fetchError } = await supabase
-      .from('dishes')
-      .select('*')
-      .eq('id', body.id)
-      .single();
-    if (fetchError || !existing) {
-      return json({ error: 'Dish not found' }, 404);
-    }
-    const merged: ClientDish = {
-      ...toClientDish(existing as DbDishRow),
-      ...body.updated,
-      id: body.id,
-    };
-    const { error } = await supabase
-      .from('dishes')
-      .upsert(toDbRow(merged), { onConflict: 'id' });
-    if (error) {
-      return json({ error: error.message }, 500);
-    }
-    return json({ success: true });
-  }
-  if (req.method === 'DELETE') {
-    const url = new URL(req.url);
-    const reset = url.searchParams.get('reset') === 'true';
-    if (reset) {
-      await supabase.from('dishes').delete().neq('id', -1);
-      const seedRows = (initialDishes as unknown as ClientDish[]).map(toDbRow);
-      const { error } = await supabase.from('dishes').upsert(seedRows, { onConflict: 'id' });
-      if (error) {return json({ error: error.message }, 500);}
-      return json({ success: true });
-    }
-    const idParam = url.searchParams.get('id');
-    const id = idParam ? Number(idParam) : NaN;
-    if (!Number.isFinite(id)) {
-      return json({ error: 'Invalid dish id' }, 400);
-    }
-    const { error } = await supabase.from('dishes').delete().eq('id', id);
-    if (error) {
-      return json({ error: error.message }, 500);
-    }
-    return json({ success: true });
-  }
-  return json({ error: 'Method not allowed' }, 405);
 }
 ````
 
@@ -7510,35 +7164,6 @@ export function validateOrderDetails(params: ValidateOrderParams): ValidationRes
 }
 ````
 
-## File: tsconfig.json
-````json
-{
-  "compilerOptions": {
-    "types": ["node", "@testing-library/jest-dom", "vitest/globals"],
-    "target": "ESNext",
-    "useDefineForClassFields": true,
-    "lib": ["DOM", "DOM.Iterable", "ESNext"],
-    "allowJs": false,
-    "skipLibCheck": true,
-    "esModuleInterop": false,
-    "allowSyntheticDefaultImports": true,
-    "strict": true,
-    "forceConsistentCasingInFileNames": true,
-    "module": "ESNext",
-    "moduleResolution": "bundler",
-    "resolveJsonModule": true,
-    "isolatedModules": true,
-    "noEmit": true,
-    "jsx": "react-jsx",
-    "paths": {
-      "@/*": ["./src/*"],
-      "@test-utils": ["./test-utils"]
-    }
-  },
-  "include": ["src", "test-utils", ".storybook/main.ts", ".storybook/preview.tsx"]
-}
-````
-
 ## File: vite.config.ts
 ````typescript
 import react from '@vitejs/plugin-react';
@@ -7886,12 +7511,84 @@ export default async function handler(req: Request): Promise<Response> {
 }
 ````
 
+## File: test-utils/render.tsx
+````typescript
+import type { ReactNode } from 'react';
+import { render as testingLibraryRender } from '@testing-library/react';
+import { MantineProvider } from '@mantine/core';
+import { theme } from '@/theme';
+export function render(ui: ReactNode) {
+  return testingLibraryRender(ui, {
+    wrapper: ({ children }: { children: ReactNode }) => (
+      <MantineProvider theme={theme}>{children}</MantineProvider>
+    ),
+  });
+}
+````
+
+## File: tsconfig.json
+````json
+{
+  "compilerOptions": {
+    "types": ["node", "@testing-library/jest-dom", "vitest/globals"],
+    "target": "ESNext",
+    "useDefineForClassFields": true,
+    "lib": ["DOM", "DOM.Iterable", "ESNext"],
+    "allowJs": false,
+    "skipLibCheck": true,
+    "allowSyntheticDefaultImports": true,
+    "strict": true,
+    "forceConsistentCasingInFileNames": true,
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "paths": {
+      "@/*": ["./src/*"],
+      "@test-utils": ["./test-utils"]
+    }
+  },
+  "include": [
+    "src",
+    "test-utils",
+    ".storybook/main.ts",
+    ".storybook/preview.tsx",
+    "api/endpoints.ts"
+  ]
+}
+````
+
+## File: eslint.config.js
+````javascript
+import mantine from 'eslint-config-mantine';
+export default [
+  ...mantine,
+  {
+    ignores: [
+      'dist',
+      'storybook-static',
+      'vite.config.ts',
+      'vitest.setup.mjs',
+      '**/*.{mjs,cjs,js,d.ts,d.mts}',
+    ],
+  },
+  {
+    files: ['**/*.story.tsx'],
+    rules: {
+      'no-console': 'off',
+    },
+  },
+];
+````
+
 ## File: src/context/MenuContext.tsx
 ````typescript
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { API_ENDPOINTS, type ApiEndpoints } from '@/api/endpoints';
-import initialDishes from '@/data/dishes.json';
 import type { DishCardProps } from '@/components/DishCard';
+import initialDishes from '@/data/dishes.json';
+import { API_ENDPOINTS, type ApiEndpoints } from '../../api/endpoints';
 export interface DishItem extends DishCardProps {
   id: number;
   category: string;
@@ -7944,7 +7641,11 @@ export function compileDishesToJson(dishes: DishItem[]): string {
       const pieceObj: Record<string, any> = {
         price: Number(dish.perPiece.price),
       };
-      if (dish.sale && dish.perPiece.discountedPrice != null && Number(dish.perPiece.discountedPrice) > 0) {
+      if (
+        dish.sale &&
+        dish.perPiece.discountedPrice != null &&
+        Number(dish.perPiece.discountedPrice) > 0
+      ) {
         pieceObj.discountedPrice = Number(dish.perPiece.discountedPrice);
       }
       item.perPiece = pieceObj;
@@ -7991,7 +7692,9 @@ export function MenuProvider({ children }: { children: React.ReactNode }) {
       })
       .catch((err) => console.error('Failed to load menu:', err))
       .finally(() => {
-        if (!cancelled) {setLoading(false);}
+        if (!cancelled) {
+          setLoading(false);
+        }
       });
     return () => {
       cancelled = true;
@@ -8016,15 +7719,11 @@ export function MenuProvider({ children }: { children: React.ReactNode }) {
   const toggleSale = (id: number) => {
     const target = dishes.find((d) => d.id === id);
     const nextSale = !target?.sale;
-    setDishes((prev) =>
-      prev.map((dish) => (dish.id === id ? { ...dish, sale: nextSale } : dish))
-    );
+    setDishes((prev) => prev.map((dish) => (dish.id === id ? { ...dish, sale: nextSale } : dish)));
     syncRequest('PATCH', { id, updated: { sale: nextSale } });
   };
   const updateDish = (id: number, updated: Partial<DishItem>) => {
-    setDishes((prev) =>
-      prev.map((dish) => (dish.id === id ? { ...dish, ...updated } : dish))
-    );
+    setDishes((prev) => prev.map((dish) => (dish.id === id ? { ...dish, ...updated } : dish)));
     syncRequest('PATCH', { id, updated });
   };
   const uploadImage = async (id: number, file: File): Promise<void> => {
@@ -8068,7 +7767,9 @@ export function MenuProvider({ children }: { children: React.ReactNode }) {
   const deleteImage = async (id: number): Promise<void> => {
     try {
       const dish = dishes.find((d) => d.id === id);
-      if (!dish?.storagePath) {return;}
+      if (!dish?.storagePath) {
+        return;
+      }
       await fetch(`/api/admin/image?path=${encodeURIComponent(dish.storagePath)}`, {
         method: 'DELETE',
         credentials: 'same-origin',
@@ -8104,10 +7805,15 @@ export function MenuProvider({ children }: { children: React.ReactNode }) {
   };
   const duplicateDish = (id: number): number => {
     const target = dishes.find((d) => d.id === id);
-    if (!target) {return -1;}
+    if (!target) {
+      return -1;
+    }
     const nextId = generateSecureDishId(dishes.map((d) => d.id));
     let newImage = target.image;
-    if (target.image && (target.image.startsWith(`${target.id}.`) || target.image === String(target.id))) {
+    if (
+      target.image &&
+      (target.image.startsWith(`${target.id}.`) || target.image === String(target.id))
+    ) {
       const ext = target.image.includes('.') ? target.image.split('.').pop() : 'jpg';
       newImage = `${nextId}.${ext}`;
     }
@@ -8158,44 +7864,6 @@ export function useMenu() {
   }
   return context;
 }
-````
-
-## File: test-utils/render.tsx
-````typescript
-import type { ReactNode } from 'react';
-import { render as testingLibraryRender } from '@testing-library/react';
-import { MantineProvider } from '@mantine/core';
-import { theme } from '@/theme';
-export function render(ui: ReactNode) {
-  return testingLibraryRender(ui, {
-    wrapper: ({ children }: { children: ReactNode }) => (
-      <MantineProvider theme={theme}>{children}</MantineProvider>
-    ),
-  });
-}
-````
-
-## File: eslint.config.js
-````javascript
-import mantine from 'eslint-config-mantine';
-export default [
-  ...mantine,
-  {
-    ignores: [
-      'dist',
-      'storybook-static',
-      'vite.config.ts',
-      'vitest.setup.mjs',
-      '**/*.{mjs,cjs,js,d.ts,d.mts}',
-    ],
-  },
-  {
-    files: ['**/*.story.tsx'],
-    rules: {
-      'no-console': 'off',
-    },
-  },
-];
 ````
 
 ## File: .storybook/preview.tsx
