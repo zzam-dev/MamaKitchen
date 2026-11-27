@@ -47,10 +47,10 @@ The content is organized as follows:
 .storybook/vite-env.d.ts
 .stylelintignore
 .stylelintrc.json
+api/_lib/supabase.ts
 api/admin-auth.ts
 api/image.ts
 api/menu.ts
-api/supabase.ts
 eslint.config.js
 index.html
 LICENSE
@@ -60,8 +60,10 @@ postcss.config.cjs
 public/favicon.svg
 README.md
 renovate.json
+src/api/_lib/supabase.ts
 src/api/endpoints.ts
-src/api/supabase.ts
+src/api/image.ts
+src/api/menu.ts
 src/App.tsx
 src/archive/Home.page.v1.tsx
 src/assets/images/agashi.jpg
@@ -383,6 +385,26 @@ declare module '*.css' {
 declare module '@mantine/core/styles.css';
 ````
 
+## File: api/_lib/supabase.ts
+````typescript
+import { createClient } from '@supabase/supabase-js';
+const supabaseUrl = process.env.SUPABASE_URL || '';
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+export const supabase = createClient(supabaseUrl, supabaseServiceKey);
+export const STORAGE_BUCKET = 'Product Images';
+export async function uploadProductImage(productId: number, file: File): Promise<string | null> {
+  const ext = file.name.split('.').pop() ?? 'jpg';
+  const path = `${productId}.${ext}`;
+  const { error } = await supabase.storage.from(STORAGE_BUCKET).upload(path, file, { upsert: true });
+  if (error) { throw error; }
+  const { data } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(path);
+  return data.publicUrl;
+}
+export async function deleteProductImage(path: string): Promise<void> {
+  await supabase.storage.from(STORAGE_BUCKET).remove([path]);
+}
+````
+
 ## File: api/admin-auth.ts
 ````typescript
 export const config = { runtime: 'edge' };
@@ -460,21 +482,238 @@ export default async function handler(req: Request): Promise<Response> {
 }
 ````
 
-## File: api/image.ts
+## File: LICENSE
+````
+MIT License
+
+Copyright (c) 2026 Luis Damy
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+````
+
+## File: public/favicon.svg
+````xml
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 163 163"><path fill="#339AF0" d="M162.162 81.5c0-45.011-36.301-81.5-81.08-81.5C36.301 0 0 36.489 0 81.5 0 126.51 36.301 163 81.081 163s81.081-36.49 81.081-81.5z"/><path fill="#fff" d="M65.983 43.049a6.234 6.234 0 00-.336 6.884 6.14 6.14 0 001.618 1.786c9.444 7.036 14.866 17.794 14.866 29.52 0 11.726-5.422 22.484-14.866 29.52a6.145 6.145 0 00-1.616 1.786 6.21 6.21 0 00-.694 4.693 6.21 6.21 0 001.028 2.186 6.151 6.151 0 006.457 2.319 6.154 6.154 0 002.177-1.035 50.083 50.083 0 007.947-7.39h17.493c3.406 0 6.174-2.772 6.174-6.194s-2.762-6.194-6.174-6.194h-9.655a49.165 49.165 0 004.071-19.69 49.167 49.167 0 00-4.07-19.692h9.66c3.406 0 6.173-2.771 6.173-6.194 0-3.422-2.762-6.193-6.173-6.193H82.574a50.112 50.112 0 00-7.952-7.397 6.15 6.15 0 00-4.578-1.153 6.189 6.189 0 00-4.055 2.438h-.006z"/><path fill="#fff" fill-rule="evenodd" d="M56.236 79.391a9.342 9.342 0 01.632-3.608 9.262 9.262 0 011.967-3.077 9.143 9.143 0 012.994-2.063 9.06 9.06 0 017.103 0 9.145 9.145 0 012.995 2.063 9.262 9.262 0 011.967 3.077 9.339 9.339 0 01-2.125 10.003 9.094 9.094 0 01-6.388 2.63 9.094 9.094 0 01-6.39-2.63 9.3 9.3 0 01-2.755-6.395z" clip-rule="evenodd"/></svg>
+````
+
+## File: README.md
+````markdown
+# Mantine Vite Template
+
+A modern React application built with Mantine UI components, Vite, and TypeScript, managed with Bun.
+
+## Features
+
+This template comes with the following features:
+
+- [PostCSS](https://postcss.org/) with [mantine-postcss-preset](https://mantine.dev/styles/postcss-preset)
+- [TypeScript](https://www.typescriptlang.org/)
+- [Storybook](https://storybook.js.org/)
+- [Vitest](https://vitest.dev/) setup with [React Testing Library](https://testing-library.com/docs/react-testing-library/intro)
+- ESLint setup with [eslint-config-mantine](https://github.com/mantinedev/eslint-config-mantine)
+
+## Prerequisites
+
+- [Bun](https://bun.sh/) installed on your system
+
+## Getting Started
+
+### Installation
+
+Install all dependencies:
+
+```bash
+bun install
+```
+
+### Development
+
+Start the development server:
+
+```bash
+bun run dev
+```
+
+The app will be available at `http://localhost:5173`
+
+## Scripts
+
+### Development & Build
+
+- `bun run dev` – Start development server with hot reload
+- `bun run build` – Build production version of the app to `dist/` folder
+- `bun run preview` – Locally preview the production build
+
+### Testing
+
+- `bun run test` – Run all tests once
+- `bun run test:watch` – Run tests in watch mode (re-runs on file changes)
+- `bun run test:ui` – Run tests with Vitest UI interface
+- `bun run typecheck` – Check TypeScript types without emitting files
+
+### Code Quality
+
+- `bun run lint` – Run ESLint and Stylelint
+- `bun run lint:fix` – Auto-fix ESLint and Stylelint issues
+- `bun run format` – Format all files with Prettier
+- `bun run format:check` – Check if files are formatted correctly
+- `bun run validate` – Run full validation (typecheck + format + lint + test + build)
+
+### Storybook
+
+- `bun run storybook` – Start Storybook dev server at `http://localhost:6006`
+- `bun run storybook:build` – Build production Storybook bundle to `storybook-static/`
+
+## Testing the Production Build
+
+To test how your app will behave in production:
+
+```bash
+# Build the production version
+bun run build
+
+# Preview the built app locally
+bun run preview
+```
+
+The preview server will start at `http://localhost:4173` (or another available port).
+
+### Alternative: Using a Static Server
+
+You can also serve the `dist/` folder with any static file server:
+
+```bash
+# Build first
+bun run build
+
+# Serve the dist folder
+cd dist
+bunx serve
+```
+
+## Project Structure
+
+```
+vite-template/
+├── src/                  # Application source code
+│   ├── components/       # React components
+│   ├── pages/           # Page components
+│   └── assets/          # Images, fonts, etc.
+├── public/              # Static files served directly
+├── test-utils/          # Testing utilities and setup
+├── .storybook/          # Storybook configuration
+└── dist/                # Production build output (generated)
+```
+
+## Deployment
+
+After running `bun run build`, the `dist/` folder contains your production-ready app. Deploy this folder to any static hosting service:
+
+- **Vercel**: `bunx vercel deploy`
+- **Netlify**: `bunx netlify deploy --prod --dir=dist`
+- **GitHub Pages**: Push `dist/` folder contents to `gh-pages` branch
+
+## Learn More
+
+- [Mantine Documentation](https://mantine.dev/)
+- [Vite Documentation](https://vitejs.dev/)
+- [Bun Documentation](https://bun.sh/docs)
+- [React Documentation](https://react.dev/)
+````
+
+## File: renovate.json
+````json
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "schedule": ["before 5am on sunday"],
+  "groupName": "all dependencies",
+  "packageRules": [
+    {
+      "matchPackagePatterns": ["*"],
+      "groupName": "all dependencies"
+    }
+  ],
+  "prHourlyLimit": 0,
+  "prConcurrentLimit": 0
+}
+````
+
+## File: src/api/_lib/supabase.ts
 ````typescript
 import { createClient } from '@supabase/supabase-js';
-import { config } from './admin-auth';
+const supabaseUrl = process.env.SUPABASE_URL || '';
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+export const supabase = createClient(supabaseUrl, supabaseServiceKey);
+export const STORAGE_BUCKET = 'Product Images';
+export async function uploadProductImage(productId: number, file: File): Promise<string | null> {
+  const ext = file.name.split('.').pop() ?? 'jpg';
+  const path = `${productId}.${ext}`;
+  const { error } = await supabase.storage.from(STORAGE_BUCKET).upload(path, file, { upsert: true });
+  if (error) { throw error; }
+  const { data } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(path);
+  return data.publicUrl;
+}
+export async function deleteProductImage(path: string): Promise<void> {
+  await supabase.storage.from(STORAGE_BUCKET).remove([path]);
+}
+````
+
+## File: src/api/endpoints.ts
+````typescript
+export const API_ENDPOINTS = {
+  PUBLIC_MENU: '/api/menu',
+  ADMIN_MENU: '/api/admin/menu',
+} as const;
+export type ApiEndpoints = typeof API_ENDPOINTS;
+````
+
+## File: src/api/image.ts
+````typescript
+import { createClient } from '@supabase/supabase-js';
 export const config = { runtime: 'edge' };
 const SESSION_PAYLOAD = 'mama_kitchen_admin_session_v1';
+const COOKIE_NAME = 'mama_admin_session';
+const STORAGE_BUCKET = 'Product Images';
+function parseCookies(cookieHeader: string): Record<string, string> {
+  return Object.fromEntries(
+    cookieHeader
+      .split(';')
+      .map((c) => c.trim().split('='))
+      .filter(([k]) => k)
+      .map(([k, ...v]) => [k.trim(), v.join('=').trim()])
+  );
+}
+function safeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) {return false;}
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) {
+    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return diff === 0;
+}
 async function isAdminAuthorized(req: Request): Promise<boolean> {
-  const cookies = req.headers.get('cookie') ?? '';
-  const token = Object.fromEntries(
-    cookies.split(';').map((c) => c.trim().split('='))
-  )[config?.COOKIE_NAME ?? 'mama_admin_session'];
+  const cookies = parseCookies(req.headers.get('cookie') ?? '');
+  const token = cookies[COOKIE_NAME];
   if (!token) {return false;}
   const secret =
     process.env.SESSION_SECRET ||
-    (config?.ADMIN_PASS ? `session_${config.ADMIN_PASS}` : 'mama_kitchen_default_session_secret_2026');
+    (process.env.ADMIN_PASS ? `session_${process.env.ADMIN_PASS}` : 'mama_kitchen_default_session_secret_2026');
   const encoder = new TextEncoder();
   const key = await crypto.subtle.importKey(
     'raw',
@@ -487,77 +726,63 @@ async function isAdminAuthorized(req: Request): Promise<boolean> {
   const expected = Array.from(new Uint8Array(signature))
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('');
-  return token === expected;
+  return safeEqual(token, expected);
 }
-/** Upload dish image to Supabase Storage bucket "Product Images" */
+function json(data: unknown, status = 200): Response {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
 export default async function handler(req: Request): Promise<Response> {
-  // ── POST /api/admin/image ────────────────────────────────────────────────
+  if (req.method !== 'POST' && req.method !== 'DELETE') {
+    return new Response('Method not allowed', { status: 405 });
+  }
+  if (!(await isAdminAuthorized(req))) {
+    return new Response('Unauthorized', { status: 401 });
+  }
+  const supabaseUrl = process.env.SUPABASE_URL ?? '';
+  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
+  const supabase = createClient(supabaseUrl, supabaseServiceKey);
+  // ── POST: upload ──────────────────────────────────────────────────────────
   if (req.method === 'POST') {
-    if (!(await isAdminAuthorized(req))) {
-      return new Response('Unauthorized', { status: 401 });
-    }
     try {
       const formData = await req.formData();
-      const file = formData.get('file') as File;
-      const productId = formData.get('productId') as string;
+      const file = formData.get('file') as File | null;
+      const productId = formData.get('productId') as string | null;
       if (!file || !productId) {
         return new Response('Missing file or productId', { status: 400 });
       }
       const ext = file.name.split('.').pop() ?? 'jpg';
       const path = `${productId}.${ext}`;
-      const supabaseUrl = process.env.SUPABASE_URL ?? '';
-      const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
-      const supabase = createClient(supabaseUrl, supabaseServiceKey);
-      // Upload to bucket "Product Images"
-      const { error } = await supabase.storage.from('Product Images').upload(path, file, {
+      const { error } = await supabase.storage.from(STORAGE_BUCKET).upload(path, file, {
         upsert: true,
       });
       if (error) {throw error;}
-      const { data } = supabase.storage.from('Product Images').getPublicUrl(path);
-      const publicUrl = data?.publicUrl ?? '';
-      return new Response(
-        JSON.stringify({ publicUrl, storagePath: path }),
-        { status: 200, headers: { 'Content-Type': 'application/json' } }
-      );
+      const { data } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(path);
+      return json({ publicUrl: data?.publicUrl ?? '', storagePath: path });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'An unknown error occurred';
-      return new Response(JSON.stringify({ error: message }), {
-        status: 500,
-        headers: { 'Content-Type': 'application/json' },
-      });
+      return json({ error: message }, 500);
     }
   }
-  if (req.method === 'DELETE') {
-    if (!(await isAdminAuthorized(req))) {
-      return new Response('Unauthorized', { status: 401 });
+  try {
+    const url = new URL(req.url);
+    const path = url.searchParams.get('path') ?? '';
+    if (!path) {
+      return new Response('Missing path parameter', { status: 400 });
     }
-    try {
-      const url = new URL(req.url);
-      const path = url.searchParams.get('path') ?? '';
-      if (!path) {
-        return new Response('Missing path parameter', { status: 400 });
-      }
-      const supabaseUrl = process.env.SUPABASE_URL ?? '';
-      const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
-      const supabase = createClient(supabaseUrl, supabaseServiceKey);
-      await supabase.storage.from('Product Images').remove([path]);
-      return new Response(JSON.stringify({ success: true }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'An unknown error occurred';
-      return new Response(JSON.stringify({ error: message }), {
-        status: 500,
-        headers: { 'Content-Type': 'application/json' },
-      });
-    }
+    const { error } = await supabase.storage.from(STORAGE_BUCKET).remove([path]);
+    if (error) {throw error;}
+    return json({ success: true });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'An unknown error occurred';
+    return json({ error: message }, 500);
   }
-  return new Response('Method not allowed', { status: 405 });
 }
 ````
 
-## File: api/menu.ts
+## File: src/api/menu.ts
 ````typescript
 import { createClient } from '@supabase/supabase-js';
 import initialDishes from '../src/data/dishes.json';
@@ -578,6 +803,7 @@ interface DbDishRow {
   sizes: Array<{ label: string; price: number; discountedPrice?: number }>;
   perPiecePrice?: number | null;
   perPieceDiscountedPrice?: number | null;
+  storage_path?: string | null;
 }
 interface ClientDish {
   id: number;
@@ -592,6 +818,7 @@ interface ClientDish {
   available?: boolean;
   sizes: Array<{ label: string; price: number; discountedPrice?: number }>;
   perPiece?: { price: number; discountedPrice?: number };
+  storagePath?: string | null;
 }
 function toDbRow(dish: ClientDish): DbDishRow {
   return {
@@ -777,313 +1004,6 @@ export default async function handler(req: Request): Promise<Response> {
   }
   return json({ error: 'Method not allowed' }, 405);
 }
-````
-
-## File: api/supabase.ts
-````typescript
-import { createClient } from '@supabase/supabase-js';
-const supabaseUrl = process.env.SUPABASE_URL || '';
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-export const supabase = createClient(supabaseUrl, supabaseServiceKey);
-export interface UpdateProductsRequestBody {
-  products: unknown[];
-  googleToken: string;
-}
-export interface GoogleTokenInfo {
-  email?: string;
-  [key: string]: unknown;
-}
-export interface ApiRequest {
-  method?: string;
-  body: UpdateProductsRequestBody;
-}
-export interface ApiResponse {
-  status: (statusCode: number) => ApiResponse;
-  json: (data: { success?: boolean; message?: string; error?: string }) => void;
-}
-export default async function handler(req: ApiRequest, _res: ApiResponse) {
-  // ── GET /api/menu (Public) ────────────────────────────────────────────────
-  if (req.method === 'GET') {
-    const { data, error } = await supabase
-      .from('dishes')
-      .select('*')
-      .order('id', { ascending: true });
-    if (error) {
-      return json({ error: error.message }, 500);
-    }
-    if (!data || data.length === 0) {
-      const seedRows = (initialDishes as unknown as ClientDish[]).map(toDbRow);
-      const { data: seeded, error: seedError } = await supabase
-        .from('dishes')
-        .upsert(seedRows, { onConflict: 'id' })
-        .select('*')
-        .order('id', { ascending: true });
-      if (seedError) {
-        return json({ error: seedError.message }, 500);
-      }
-      return json({ dishes: (seeded as DbDishRow[]).map(toClientDish) });
-    }
-    return json({ dishes: (data as DbDishRow[]).map(toClientDish) });
-  }
-  if (!(await isAdminAuthorized(req))) {
-    return json({ error: 'Unauthorized' }, 401);
-  }
-  if (req.method === 'POST') {
-    const body = (await req.json()) as { dish?: ClientDish; dishes?: ClientDish[] };
-    const items = body.dishes ?? (body.dish ? [body.dish] : []);
-    if (items.length === 0) {
-      return json({ error: 'Missing dish payload' }, 400);
-    }
-    const { error } = await supabase
-      .from('dishes')
-      .upsert(items.map(toDbRow), { onConflict: 'id' });
-    if (error) {
-      return json({ error: error.message }, 500);
-    }
-    return json({ success: true });
-  }
-  if (req.method === 'PATCH') {
-    const body = (await req.json()) as { id?: number; updated?: Partial<ClientDish> };
-    if (!body.id || !body.updated) {
-      return json({ error: 'Missing id or updated fields' }, 400);
-    }
-    const { data: existing, error: fetchError } = await supabase
-      .from('dishes')
-      .select('*')
-      .eq('id', body.id)
-      .single();
-    if (fetchError || !existing) {
-      return json({ error: 'Dish not found' }, 404);
-    }
-    const merged: ClientDish = {
-      ...toClientDish(existing as DbDishRow),
-      ...body.updated,
-      id: body.id,
-    };
-    const { error } = await supabase
-      .from('dishes')
-      .upsert(toDbRow(merged), { onConflict: 'id' });
-    if (error) {
-      return json({ error: error.message }, 500);
-    }
-    return json({ success: true });
-  }
-  if (req.method === 'DELETE') {
-    const url = new URL(req.url);
-    const reset = url.searchParams.get('reset') === 'true';
-    if (reset) {
-      await supabase.from('dishes').delete().neq('id', -1);
-      const seedRows = (initialDishes as unknown as ClientDish[]).map(toDbRow);
-      const { error } = await supabase.from('dishes').upsert(seedRows, { onConflict: 'id' });
-      if (error) {return json({ error: error.message }, 500);}
-      return json({ success: true });
-    }
-    const idParam = url.searchParams.get('id');
-    const id = idParam ? Number(idParam) : NaN;
-    if (!Number.isFinite(id)) {
-      return json({ error: 'Invalid dish id' }, 400);
-    }
-    const { error } = await supabase.from('dishes').delete().eq('id', id);
-    if (error) {
-      return json({ error: error.message }, 500);
-    }
-    return json({ success: true });
-  }
-  return json({ error: 'Method not allowed' }, 405);
-}
-export const STORAGE_BUCKET = 'Product Images';
-export async function uploadProductImage(productId: number, file: File): Promise<string | null> {
-  const ext = file.name.split('.').pop() ?? 'jpg';
-  const path = `${productId}.${ext}`;
-  const { error } = await supabase.storage.from(STORAGE_BUCKET).upload(path, file, { upsert: true });
-  if (error) {throw error;}
-  const { data } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(path);
-  return data.publicUrl;
-}
-export async function deleteProductImage(path: string): Promise<void> {
-  await supabase.storage.from(STORAGE_BUCKET).remove([path]);
-}
-````
-
-## File: LICENSE
-````
-MIT License
-
-Copyright (c) 2026 Luis Damy
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-````
-
-## File: public/favicon.svg
-````xml
-<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 163 163"><path fill="#339AF0" d="M162.162 81.5c0-45.011-36.301-81.5-81.08-81.5C36.301 0 0 36.489 0 81.5 0 126.51 36.301 163 81.081 163s81.081-36.49 81.081-81.5z"/><path fill="#fff" d="M65.983 43.049a6.234 6.234 0 00-.336 6.884 6.14 6.14 0 001.618 1.786c9.444 7.036 14.866 17.794 14.866 29.52 0 11.726-5.422 22.484-14.866 29.52a6.145 6.145 0 00-1.616 1.786 6.21 6.21 0 00-.694 4.693 6.21 6.21 0 001.028 2.186 6.151 6.151 0 006.457 2.319 6.154 6.154 0 002.177-1.035 50.083 50.083 0 007.947-7.39h17.493c3.406 0 6.174-2.772 6.174-6.194s-2.762-6.194-6.174-6.194h-9.655a49.165 49.165 0 004.071-19.69 49.167 49.167 0 00-4.07-19.692h9.66c3.406 0 6.173-2.771 6.173-6.194 0-3.422-2.762-6.193-6.173-6.193H82.574a50.112 50.112 0 00-7.952-7.397 6.15 6.15 0 00-4.578-1.153 6.189 6.189 0 00-4.055 2.438h-.006z"/><path fill="#fff" fill-rule="evenodd" d="M56.236 79.391a9.342 9.342 0 01.632-3.608 9.262 9.262 0 011.967-3.077 9.143 9.143 0 012.994-2.063 9.06 9.06 0 017.103 0 9.145 9.145 0 012.995 2.063 9.262 9.262 0 011.967 3.077 9.339 9.339 0 01-2.125 10.003 9.094 9.094 0 01-6.388 2.63 9.094 9.094 0 01-6.39-2.63 9.3 9.3 0 01-2.755-6.395z" clip-rule="evenodd"/></svg>
-````
-
-## File: README.md
-````markdown
-# Mantine Vite Template
-
-A modern React application built with Mantine UI components, Vite, and TypeScript, managed with Bun.
-
-## Features
-
-This template comes with the following features:
-
-- [PostCSS](https://postcss.org/) with [mantine-postcss-preset](https://mantine.dev/styles/postcss-preset)
-- [TypeScript](https://www.typescriptlang.org/)
-- [Storybook](https://storybook.js.org/)
-- [Vitest](https://vitest.dev/) setup with [React Testing Library](https://testing-library.com/docs/react-testing-library/intro)
-- ESLint setup with [eslint-config-mantine](https://github.com/mantinedev/eslint-config-mantine)
-
-## Prerequisites
-
-- [Bun](https://bun.sh/) installed on your system
-
-## Getting Started
-
-### Installation
-
-Install all dependencies:
-
-```bash
-bun install
-```
-
-### Development
-
-Start the development server:
-
-```bash
-bun run dev
-```
-
-The app will be available at `http://localhost:5173`
-
-## Scripts
-
-### Development & Build
-
-- `bun run dev` – Start development server with hot reload
-- `bun run build` – Build production version of the app to `dist/` folder
-- `bun run preview` – Locally preview the production build
-
-### Testing
-
-- `bun run test` – Run all tests once
-- `bun run test:watch` – Run tests in watch mode (re-runs on file changes)
-- `bun run test:ui` – Run tests with Vitest UI interface
-- `bun run typecheck` – Check TypeScript types without emitting files
-
-### Code Quality
-
-- `bun run lint` – Run ESLint and Stylelint
-- `bun run lint:fix` – Auto-fix ESLint and Stylelint issues
-- `bun run format` – Format all files with Prettier
-- `bun run format:check` – Check if files are formatted correctly
-- `bun run validate` – Run full validation (typecheck + format + lint + test + build)
-
-### Storybook
-
-- `bun run storybook` – Start Storybook dev server at `http://localhost:6006`
-- `bun run storybook:build` – Build production Storybook bundle to `storybook-static/`
-
-## Testing the Production Build
-
-To test how your app will behave in production:
-
-```bash
-# Build the production version
-bun run build
-
-# Preview the built app locally
-bun run preview
-```
-
-The preview server will start at `http://localhost:4173` (or another available port).
-
-### Alternative: Using a Static Server
-
-You can also serve the `dist/` folder with any static file server:
-
-```bash
-# Build first
-bun run build
-
-# Serve the dist folder
-cd dist
-bunx serve
-```
-
-## Project Structure
-
-```
-vite-template/
-├── src/                  # Application source code
-│   ├── components/       # React components
-│   ├── pages/           # Page components
-│   └── assets/          # Images, fonts, etc.
-├── public/              # Static files served directly
-├── test-utils/          # Testing utilities and setup
-├── .storybook/          # Storybook configuration
-└── dist/                # Production build output (generated)
-```
-
-## Deployment
-
-After running `bun run build`, the `dist/` folder contains your production-ready app. Deploy this folder to any static hosting service:
-
-- **Vercel**: `bunx vercel deploy`
-- **Netlify**: `bunx netlify deploy --prod --dir=dist`
-- **GitHub Pages**: Push `dist/` folder contents to `gh-pages` branch
-
-## Learn More
-
-- [Mantine Documentation](https://mantine.dev/)
-- [Vite Documentation](https://vitejs.dev/)
-- [Bun Documentation](https://bun.sh/docs)
-- [React Documentation](https://react.dev/)
-````
-
-## File: renovate.json
-````json
-{
-  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "schedule": ["before 5am on sunday"],
-  "groupName": "all dependencies",
-  "packageRules": [
-    {
-      "matchPackagePatterns": ["*"],
-      "groupName": "all dependencies"
-    }
-  ],
-  "prHourlyLimit": 0,
-  "prConcurrentLimit": 0
-}
-````
-
-## File: src/api/endpoints.ts
-````typescript
-export const API_ENDPOINTS = {
-  PUBLIC_MENU: '/api/menu',
-  ADMIN_MENU: '/api/admin/menu',
-} as const;
-export type ApiEndpoints = typeof API_ENDPOINTS;
 ````
 
 ## File: src/assets/images/index.ts
@@ -5053,6 +4973,105 @@ jobs:
         run: npm test
 ````
 
+## File: api/image.ts
+````typescript
+import { createClient } from '@supabase/supabase-js';
+export const config = { runtime: 'edge' };
+const SESSION_PAYLOAD = 'mama_kitchen_admin_session_v1';
+const COOKIE_NAME = 'mama_admin_session';
+const STORAGE_BUCKET = 'Product Images';
+function parseCookies(cookieHeader: string): Record<string, string> {
+  return Object.fromEntries(
+    cookieHeader
+      .split(';')
+      .map((c) => c.trim().split('='))
+      .filter(([k]) => k)
+      .map(([k, ...v]) => [k.trim(), v.join('=').trim()])
+  );
+}
+function safeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) {return false;}
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) {
+    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return diff === 0;
+}
+async function isAdminAuthorized(req: Request): Promise<boolean> {
+  const cookies = parseCookies(req.headers.get('cookie') ?? '');
+  const token = cookies[COOKIE_NAME];
+  if (!token) {return false;}
+  const secret =
+    process.env.SESSION_SECRET ||
+    (process.env.ADMIN_PASS ? `session_${process.env.ADMIN_PASS}` : 'mama_kitchen_default_session_secret_2026');
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    'raw',
+    encoder.encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+  const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(SESSION_PAYLOAD));
+  const expected = Array.from(new Uint8Array(signature))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+  return safeEqual(token, expected);
+}
+function json(data: unknown, status = 200): Response {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+export default async function handler(req: Request): Promise<Response> {
+  if (req.method !== 'POST' && req.method !== 'DELETE') {
+    return new Response('Method not allowed', { status: 405 });
+  }
+  if (!(await isAdminAuthorized(req))) {
+    return new Response('Unauthorized', { status: 401 });
+  }
+  const supabaseUrl = process.env.SUPABASE_URL ?? '';
+  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
+  const supabase = createClient(supabaseUrl, supabaseServiceKey);
+  // ── POST: upload ──────────────────────────────────────────────────────────
+  if (req.method === 'POST') {
+    try {
+      const formData = await req.formData();
+      const file = formData.get('file') as File | null;
+      const productId = formData.get('productId') as string | null;
+      if (!file || !productId) {
+        return new Response('Missing file or productId', { status: 400 });
+      }
+      const ext = file.name.split('.').pop() ?? 'jpg';
+      const path = `${productId}.${ext}`;
+      const { error } = await supabase.storage.from(STORAGE_BUCKET).upload(path, file, {
+        upsert: true,
+      });
+      if (error) {throw error;}
+      const { data } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(path);
+      return json({ publicUrl: data?.publicUrl ?? '', storagePath: path });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'An unknown error occurred';
+      return json({ error: message }, 500);
+    }
+  }
+  try {
+    const url = new URL(req.url);
+    const path = url.searchParams.get('path') ?? '';
+    if (!path) {
+      return new Response('Missing path parameter', { status: 400 });
+    }
+    const { error } = await supabase.storage.from(STORAGE_BUCKET).remove([path]);
+    if (error) {throw error;}
+    return json({ success: true });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'An unknown error occurred';
+    return json({ error: message }, 500);
+  }
+}
+````
+
 ## File: index.html
 ````html
 <!doctype html>
@@ -5140,53 +5159,6 @@ export default async function middleware(request: Request): Promise<Response | u
     return Response.redirect(new URL('/admin-login', request.url), 302);
   }
   return undefined;
-}
-````
-
-## File: src/api/supabase.ts
-````typescript
-import { createClient } from '@supabase/supabase-js';
-const supabaseUrl = process.env.SUPABASE_URL || '';
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-export const supabase = createClient(supabaseUrl, supabaseServiceKey);
-export interface UpdateProductsRequestBody {
-    products: unknown[];
-    googleToken: string;
-}
-export interface GoogleTokenInfo {
-    email?: string;
-    [key: string]: unknown;
-}
-export interface ApiRequest {
-    method?: string;
-    body: UpdateProductsRequestBody;
-}
-export interface ApiResponse {
-    status: (statusCode: number) => ApiResponse;
-    json: (data: { success?: boolean; message?: string; error?: string }) => void;
-}
-export default async function handler(req: ApiRequest, res: ApiResponse) {
-    // 1. Only allow secure POST requests from your dashboard
-    if (req.method !== 'POST') {
-        return res.status(405).json({ error: 'Method not allowed' });
-    }
-    try {
-        const { products, googleToken } = req.body;
-        const googleVerify = await fetch(
-            `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(googleToken)}`
-        );
-        const tokenInfo = (await googleVerify.json()) as GoogleTokenInfo;
-        if (!googleVerify.ok || tokenInfo.email !== 'the_owner_email@gmail.com') {
-            return res.status(401).json({ error: 'Unauthorized Google Account' });
-        }
-        await supabase.from('products').delete().neq('id', 0);
-        const { error } = await supabase.from('products').insert(products);
-        if (error) {throw error;}
-        return res.status(200).json({ success: true, message: 'Inventory updated instantly!' });
-    } catch (err) {
-        const message = err instanceof Error ? err.message : 'An unknown error occurred';
-        return res.status(500).json({ error: message });
-    }
 }
 ````
 
@@ -6765,281 +6737,6 @@ export function useLanguage() {
 }
 ````
 
-## File: src/context/MenuContext.tsx
-````typescript
-import React, { createContext, useContext, useEffect, useState } from 'react';
-import { API_ENDPOINTS, type ApiEndpoints } from '@/api/endpoints';
-import initialDishes from '@/data/dishes.json';
-import type { DishCardProps, DishSize, SizeLabel } from '@/components/DishCard';
-export interface DishItem extends DishCardProps {
-  id: number;
-  category: string;
-  storagePath?: string | null;
-}
-export function generateSecureDishId(existingIds: number[] = []): number {
-  const existingSet = new Set(existingIds);
-  const buffer = new Uint32Array(1);
-  let id = 0;
-  do {
-    if (typeof window !== 'undefined' && window.crypto?.getRandomValues) {
-      window.crypto.getRandomValues(buffer);
-      id = 10000000 + (buffer[0] % 90000000);
-    } else {
-      id = Math.floor(10000000 + Math.random() * 90000000);
-    }
-  } while (existingSet.has(id));
-  return id;
-}
-export function compileDishesToJson(dishes: DishItem[]): string {
-  const cleanList = dishes.map((dish) => {
-    const item: Record<string, any> = {
-      id: dish.id,
-      title: dish.title.trim(),
-    };
-    if (dish.title_ar && dish.title_ar.trim()) {
-      item.title_ar = dish.title_ar.trim();
-    }
-    item.description = (dish.description || '').trim();
-    if (dish.description_ar && dish.description_ar.trim()) {
-      item.description_ar = dish.description_ar.trim();
-    }
-    item.image = dish.image || 'maincourse';
-    item.category = dish.category || 'main';
-    item.sale = Boolean(dish.sale);
-    if (dish.available === false) {
-      item.available = false;
-    }
-    item.sizes = (dish.sizes || []).map((s) => {
-      const sizeObj: Record<string, any> = {
-        label: s.label,
-        price: Number(s.price),
-      };
-      if (dish.sale && s.discountedPrice != null && Number(s.discountedPrice) > 0) {
-        sizeObj.discountedPrice = Number(s.discountedPrice);
-      }
-      return sizeObj;
-    });
-    if (dish.perPiece && Number(dish.perPiece.price) > 0) {
-      const pieceObj: Record<string, any> = {
-        price: Number(dish.perPiece.price),
-      };
-      if (dish.sale && dish.perPiece.discountedPrice != null && Number(dish.perPiece.discountedPrice) > 0) {
-        pieceObj.discountedPrice = Number(dish.perPiece.discountedPrice);
-      }
-      item.perPiece = pieceObj;
-    }
-    return item;
-  });
-  return JSON.stringify(cleanList, null, 2);
-}
-interface MenuContextType {
-  dishes: DishItem[];
-  endpoints: ApiEndpoints;
-  toggleAvailability: (id: number) => void;
-  toggleSale: (id: number) => void;
-  updateDish: (id: number, updated: Partial<DishItem>) => void;
-  addDish: (newDish: Omit<DishItem, 'id'> & { id?: number }) => number;
-  deleteDish: (id: number) => void;
-  duplicateDish: (id: number) => number;
-  generateSecureId: () => number;
-  resetMenu: () => void;
-  compileServerJson: () => string;
-  uploadImage: (id: number, file: File) => Promise<void>;
-  deleteImage: (id: number) => Promise<void>;
-}
-const MenuContext = createContext<MenuContextType | undefined>(undefined);
-const MENU_STORAGE_KEY = 'mama-kitchen-menu-state-v1';
-export function MenuProvider({ children }: { children: React.ReactNode }) {
-  const [dishes, setDishes] = useState<DishItem[]>(() => {
-    try {
-      const saved = localStorage.getItem(MENU_STORAGE_KEY);
-      if (saved) {
-        return JSON.parse(saved);
-      }
-    } catch (e) {
-      console.error('Failed to load menu overrides', e);
-    }
-    return initialDishes as unknown as DishItem[];
-  });
-  useEffect(() => {
-    try {
-      localStorage.setItem(MENU_STORAGE_KEY, JSON.stringify(dishes));
-    } catch (e) {
-      console.error('Failed to save menu state', e);
-    }
-  }, [dishes]);
-  useEffect(() => {
-    let cancelled = false;
-    fetch(API_ENDPOINTS.PUBLIC_MENU)
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data: { dishes?: DishItem[] } | null) => {
-        if (!cancelled && data?.dishes && Array.isArray(data.dishes) && data.dishes.length > 0) {
-          setDishes(data.dishes);
-        }
-      })
-      .catch(() => {
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-  const syncRequest = (method: 'POST' | 'PATCH' | 'DELETE', body?: unknown, query = '') => {
-    fetch(`${API_ENDPOINTS.PUBLIC_MENU}${query}`, {
-      method,
-      headers: body ? { 'Content-Type': 'application/json' } : undefined,
-      body: body ? JSON.stringify(body) : undefined,
-      credentials: 'same-origin',
-    }).catch((err) => console.error('Failed to sync menu change:', err));
-  };
-  const toggleAvailability = (id: number) => {
-    const target = dishes.find((d) => d.id === id);
-    const nextAvailable = target?.available === false;
-    setDishes((prev) =>
-      prev.map((dish) => (dish.id === id ? { ...dish, available: nextAvailable } : dish))
-    );
-    syncRequest('PATCH', { id, updated: { available: nextAvailable } });
-  };
-  const toggleSale = (id: number) => {
-    const target = dishes.find((d) => d.id === id);
-    const nextSale = !target?.sale;
-    setDishes((prev) =>
-      prev.map((dish) => (dish.id === id ? { ...dish, sale: nextSale } : dish))
-    );
-    syncRequest('PATCH', { id, updated: { sale: nextSale } });
-  };
-  const updateDish = (id: number, updated: Partial<DishItem>) => {
-    setDishes((prev) =>
-      prev.map((dish) => (dish.id === id ? { ...dish, ...updated } : dish))
-    );
-    syncRequest('PATCH', { id, updated });
-  };
-  const uploadImage = async (id: number, file: File): Promise<void> => {
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('productId', String(id));
-      const response = await fetch('/api/admin/image', {
-        method: 'POST',
-        body: formData,
-        credentials: 'same-origin',
-      });
-      if (!response.ok) {
-        const data = (await response.json()).catch(() => ({}));
-        throw new Error(data.error || `Upload failed (${response.status})`);
-      }
-      const { publicUrl, storagePath } = (await response.json()) as {
-        publicUrl: string;
-        storagePath: string;
-      };
-      setDishes((prev) =>
-        prev.map((dish) =>
-          dish.id === id
-            ? {
-                ...dish,
-                image: storagePath,
-                uploadedDataUrl: publicUrl,
-                storagePath,
-              }
-            : dish
-        )
-      );
-      syncRequest('PATCH', { id, updated: { image: storagePath, uploadedDataUrl: publicUrl } });
-    } catch (err) {
-      console.error('Failed to upload image:', err);
-    }
-  };
-  const deleteImage = async (id: number): Promise<void> => {
-    try {
-      const dish = dishes.find((d) => d.id === id);
-      if (!dish?.storagePath) {return;}
-      await fetch(`/api/admin/image?path=${encodeURIComponent(dish.storagePath)}`, {
-        method: 'DELETE',
-        credentials: 'same-origin',
-      });
-      setDishes((prev) =>
-        prev.map((dish) =>
-          dish.id === id
-            ? { ...dish, uploadedDataUrl: undefined, image: 'maincourse', storagePath: null }
-            : dish
-        )
-      );
-      syncRequest('PATCH', { id, updated: { image: 'maincourse', uploadedDataUrl: undefined } });
-    } catch (err) {
-      console.error('Failed to delete image:', err);
-    }
-  };
-  const addDish = (newDish: Omit<DishItem, 'id'> & { id?: number }): number => {
-    const id = newDish.id ?? generateSecureDishId(dishes.map((d) => d.id));
-    const dishWithId: DishItem = {
-      ...newDish,
-      id,
-    };
-    setDishes((prev) => [dishWithId, ...prev]);
-    syncRequest('POST', { dish: dishWithId });
-    return id;
-  };
-  const deleteDish = (id: number) => {
-    setDishes((prev) => prev.filter((d) => d.id !== id));
-    syncRequest('DELETE', undefined, `?id=${id}`);
-  };
-  const duplicateDish = (id: number): number => {
-    const target = dishes.find((d) => d.id === id);
-    if (!target) {return -1;}
-    const nextId = generateSecureDishId(dishes.map((d) => d.id));
-    let newImage = target.image;
-    if (target.image && (target.image.startsWith(`${target.id}.`) || target.image === String(target.id))) {
-      const ext = target.image.includes('.') ? target.image.split('.').pop() : 'jpg';
-      newImage = `${nextId}.${ext}`;
-    }
-    const cloned: DishItem = {
-      ...target,
-      id: nextId,
-      image: newImage,
-      title: `${target.title} (Copy)`,
-      title_ar: target.title_ar ? `${target.title_ar} (نسخة)` : undefined,
-    };
-    setDishes((prev) => [cloned, ...prev]);
-    syncRequest('POST', { dish: cloned });
-    return nextId;
-  };
-  const generateSecureId = () => generateSecureDishId(dishes.map((d) => d.id));
-  const resetMenu = () => {
-    setDishes(initialDishes as unknown as DishItem[]);
-    localStorage.removeItem(MENU_STORAGE_KEY);
-    syncRequest('DELETE', undefined, '?reset=true');
-  };
-  const compileServerJson = () => compileDishesToJson(dishes);
-  return (
-    <MenuContext.Provider
-      value={{
-        dishes,
-        endpoints: API_ENDPOINTS,
-        toggleAvailability,
-        toggleSale,
-        updateDish,
-        addDish,
-        deleteDish,
-        duplicateDish,
-        generateSecureId,
-        resetMenu,
-        compileServerJson,
-        uploadImage,
-        deleteImage,
-      }}
-    >
-      {children}
-    </MenuContext.Provider>
-  );
-}
-export function useMenu() {
-  const context = useContext(MenuContext);
-  if (!context) {
-    throw new Error('useMenu must be used within a MenuProvider');
-  }
-  return context;
-}
-````
-
 ## File: src/pages/Dashboard/Dashboard.page.tsx
 ````typescript
 import React, { useState } from 'react';
@@ -7975,6 +7672,492 @@ const config: StorybookConfig = {
   },
 };
 export default config;
+````
+
+## File: api/menu.ts
+````typescript
+import { createClient } from '@supabase/supabase-js';
+import initialDishes from '../src/data/dishes.json';
+export const config = { runtime: 'edge' };
+const SESSION_PAYLOAD = 'mama_kitchen_admin_session_v1';
+const COOKIE_NAME = 'mama_admin_session';
+interface DbDishRow {
+  id: number;
+  title: string;
+  title_ar: string;
+  description: string;
+  description_ar: string;
+  image: string;
+  uploadedDataUrl?: string | null;
+  category: string;
+  sale: boolean;
+  available: boolean;
+  sizes: Array<{ label: string; price: number; discountedPrice?: number }>;
+  perPiecePrice?: number | null;
+  perPieceDiscountedPrice?: number | null;
+  storage_path?: string | null;
+}
+interface ClientDish {
+  id: number;
+  title: string;
+  title_ar?: string;
+  description: string;
+  description_ar?: string;
+  image: string;
+  uploadedDataUrl?: string;
+  category: string;
+  sale: boolean;
+  available?: boolean;
+  sizes: Array<{ label: string; price: number; discountedPrice?: number }>;
+  perPiece?: { price: number; discountedPrice?: number };
+  storagePath?: string | null;
+}
+function toDbRow(dish: ClientDish): DbDishRow {
+  return {
+    id: dish.id,
+    title: dish.title,
+    title_ar: dish.title_ar ?? '',
+    description: dish.description ?? '',
+    description_ar: dish.description_ar ?? '',
+    image: dish.image ?? 'maincourse',
+    uploadedDataUrl: dish.uploadedDataUrl ?? null,
+    category: dish.category ?? 'main',
+    sale: Boolean(dish.sale),
+    available: dish.available !== false,
+    sizes: dish.sizes ?? [],
+    perPiecePrice: dish.perPiece?.price ?? null,
+    perPieceDiscountedPrice: dish.perPiece?.discountedPrice ?? null,
+    storage_path: dish.storagePath ?? null,
+  };
+}
+function toClientDish(row: DbDishRow): ClientDish {
+  const dish: ClientDish = {
+    id: row.id,
+    title: row.title,
+    title_ar: row.title_ar || undefined,
+    description: row.description,
+    description_ar: row.description_ar || undefined,
+    image: row.image,
+    category: row.category,
+    sale: row.sale,
+    available: row.available,
+    sizes: row.sizes ?? [],
+    storagePath: row.storage_path ?? undefined,
+  };
+  if (row.uploadedDataUrl) {
+    dish.uploadedDataUrl = row.uploadedDataUrl;
+  }
+  if (row.perPiecePrice != null && Number(row.perPiecePrice) > 0) {
+    dish.perPiece = {
+      price: Number(row.perPiecePrice),
+      ...(row.perPieceDiscountedPrice != null && Number(row.perPieceDiscountedPrice) > 0
+        ? { discountedPrice: Number(row.perPieceDiscountedPrice) }
+        : {}),
+    };
+  }
+  return dish;
+}
+function parseCookies(cookieHeader: string): Record<string, string> {
+  return Object.fromEntries(
+    cookieHeader
+      .split(';')
+      .map((c) => c.trim().split('='))
+      .filter(([k]) => k)
+      .map(([k, ...v]) => [k.trim(), v.join('=').trim()])
+  );
+}
+function safeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) {return false;}
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) {
+    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return diff === 0;
+}
+async function isAdminAuthorized(req: Request): Promise<boolean> {
+  const cookies = parseCookies(req.headers.get('cookie') ?? '');
+  const token = cookies[COOKIE_NAME];
+  if (!token) {return false;}
+  const secret =
+    process.env.SESSION_SECRET ||
+    (process.env.ADMIN_PASS ? `session_${process.env.ADMIN_PASS}` : 'mama_kitchen_default_session_secret_2026');
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    'raw',
+    encoder.encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+  const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(SESSION_PAYLOAD));
+  const expected = Array.from(new Uint8Array(signature))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+  return safeEqual(token, expected);
+}
+function json(data: unknown, status = 200): Response {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+export default async function handler(req: Request): Promise<Response> {
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !supabaseKey) {
+    return json({ error: 'Supabase environment variables are not configured.' }, 500);
+  }
+  const supabase = createClient(supabaseUrl, supabaseKey);
+  if (req.method === 'GET') {
+    const { data, error } = await supabase
+      .from('dishes')
+      .select('*')
+      .order('id', { ascending: true });
+    if (error) {
+      return json({ error: error.message }, 500);
+    }
+    return json({ dishes: ((data ?? []) as DbDishRow[]).map(toClientDish) });
+  }
+  if (!(await isAdminAuthorized(req))) {
+    return json({ error: 'Unauthorized' }, 401);
+  }
+  if (req.method === 'POST') {
+    const body = (await req.json()) as { dish?: ClientDish; dishes?: ClientDish[] };
+    const items = body.dishes ?? (body.dish ? [body.dish] : []);
+    if (items.length === 0) {
+      return json({ error: 'Missing dish payload' }, 400);
+    }
+    const { error } = await supabase
+      .from('dishes')
+      .upsert(items.map(toDbRow), { onConflict: 'id' });
+    if (error) {
+      return json({ error: error.message }, 500);
+    }
+    return json({ success: true });
+  }
+  if (req.method === 'PATCH') {
+    const body = (await req.json()) as { id?: number; updated?: Partial<ClientDish> };
+    if (!body.id || !body.updated) {
+      return json({ error: 'Missing id or updated fields' }, 400);
+    }
+    const { data: existing, error: fetchError } = await supabase
+      .from('dishes')
+      .select('*')
+      .eq('id', body.id)
+      .single();
+    if (fetchError || !existing) {
+      return json({ error: 'Dish not found' }, 404);
+    }
+    const merged: ClientDish = {
+      ...toClientDish(existing as DbDishRow),
+      ...body.updated,
+      id: body.id,
+    };
+    const { error } = await supabase
+      .from('dishes')
+      .upsert(toDbRow(merged), { onConflict: 'id' });
+    if (error) {
+      return json({ error: error.message }, 500);
+    }
+    return json({ success: true });
+  }
+  if (req.method === 'DELETE') {
+    const url = new URL(req.url);
+    const reset = url.searchParams.get('reset') === 'true';
+    if (reset) {
+      await supabase.from('dishes').delete().neq('id', -1);
+      const seedRows = (initialDishes as unknown as ClientDish[]).map(toDbRow);
+      const { error } = await supabase.from('dishes').upsert(seedRows, { onConflict: 'id' });
+      if (error) {return json({ error: error.message }, 500);}
+      return json({ success: true });
+    }
+    const idParam = url.searchParams.get('id');
+    const id = idParam ? Number(idParam) : NaN;
+    if (!Number.isFinite(id)) {
+      return json({ error: 'Invalid dish id' }, 400);
+    }
+    const { error } = await supabase.from('dishes').delete().eq('id', id);
+    if (error) {
+      return json({ error: error.message }, 500);
+    }
+    return json({ success: true });
+  }
+  return json({ error: 'Method not allowed' }, 405);
+}
+````
+
+## File: src/context/MenuContext.tsx
+````typescript
+import React, { createContext, useContext, useEffect, useState } from 'react';
+import { API_ENDPOINTS, type ApiEndpoints } from '@/api/endpoints';
+import initialDishes from '@/data/dishes.json';
+import type { DishCardProps } from '@/components/DishCard';
+export interface DishItem extends DishCardProps {
+  id: number;
+  category: string;
+  storagePath?: string | null;
+}
+export function generateSecureDishId(existingIds: number[] = []): number {
+  const existingSet = new Set(existingIds);
+  const buffer = new Uint32Array(1);
+  let id = 0;
+  do {
+    if (typeof window !== 'undefined' && window.crypto?.getRandomValues) {
+      window.crypto.getRandomValues(buffer);
+      id = 10000000 + (buffer[0] % 90000000);
+    } else {
+      id = Math.floor(10000000 + Math.random() * 90000000);
+    }
+  } while (existingSet.has(id));
+  return id;
+}
+export function compileDishesToJson(dishes: DishItem[]): string {
+  const cleanList = dishes.map((dish) => {
+    const item: Record<string, any> = {
+      id: dish.id,
+      title: dish.title.trim(),
+    };
+    if (dish.title_ar && dish.title_ar.trim()) {
+      item.title_ar = dish.title_ar.trim();
+    }
+    item.description = (dish.description || '').trim();
+    if (dish.description_ar && dish.description_ar.trim()) {
+      item.description_ar = dish.description_ar.trim();
+    }
+    item.image = dish.image || 'maincourse';
+    item.category = dish.category || 'main';
+    item.sale = Boolean(dish.sale);
+    if (dish.available === false) {
+      item.available = false;
+    }
+    item.sizes = (dish.sizes || []).map((s) => {
+      const sizeObj: Record<string, any> = {
+        label: s.label,
+        price: Number(s.price),
+      };
+      if (dish.sale && s.discountedPrice != null && Number(s.discountedPrice) > 0) {
+        sizeObj.discountedPrice = Number(s.discountedPrice);
+      }
+      return sizeObj;
+    });
+    if (dish.perPiece && Number(dish.perPiece.price) > 0) {
+      const pieceObj: Record<string, any> = {
+        price: Number(dish.perPiece.price),
+      };
+      if (dish.sale && dish.perPiece.discountedPrice != null && Number(dish.perPiece.discountedPrice) > 0) {
+        pieceObj.discountedPrice = Number(dish.perPiece.discountedPrice);
+      }
+      item.perPiece = pieceObj;
+    }
+    return item;
+  });
+  return JSON.stringify(cleanList, null, 2);
+}
+interface MenuContextType {
+  dishes: DishItem[];
+  loading: boolean;
+  endpoints: ApiEndpoints;
+  toggleAvailability: (id: number) => void;
+  toggleSale: (id: number) => void;
+  updateDish: (id: number, updated: Partial<DishItem>) => void;
+  addDish: (newDish: Omit<DishItem, 'id'> & { id?: number }) => number;
+  deleteDish: (id: number) => void;
+  duplicateDish: (id: number) => number;
+  generateSecureId: () => number;
+  resetMenu: () => void;
+  compileServerJson: () => string;
+  uploadImage: (id: number, file: File) => Promise<void>;
+  deleteImage: (id: number) => Promise<void>;
+}
+const MenuContext = createContext<MenuContextType | undefined>(undefined);
+const LEGACY_MENU_STORAGE_KEY = 'mama-kitchen-menu-state-v1';
+export function MenuProvider({ children }: { children: React.ReactNode }) {
+  const [dishes, setDishes] = useState<DishItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    try {
+      localStorage.removeItem(LEGACY_MENU_STORAGE_KEY);
+    } catch {
+    }
+  }, []);
+  useEffect(() => {
+    let cancelled = false;
+    fetch(API_ENDPOINTS.PUBLIC_MENU)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { dishes?: DishItem[] } | null) => {
+        if (!cancelled && data?.dishes && Array.isArray(data.dishes)) {
+          setDishes(data.dishes);
+        }
+      })
+      .catch((err) => console.error('Failed to load menu:', err))
+      .finally(() => {
+        if (!cancelled) {setLoading(false);}
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const syncRequest = (method: 'POST' | 'PATCH' | 'DELETE', body?: unknown, query = '') => {
+    fetch(`${API_ENDPOINTS.PUBLIC_MENU}${query}`, {
+      method,
+      headers: body ? { 'Content-Type': 'application/json' } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+      credentials: 'same-origin',
+    }).catch((err) => console.error('Failed to sync menu change:', err));
+  };
+  const toggleAvailability = (id: number) => {
+    const target = dishes.find((d) => d.id === id);
+    const nextAvailable = target?.available === false;
+    setDishes((prev) =>
+      prev.map((dish) => (dish.id === id ? { ...dish, available: nextAvailable } : dish))
+    );
+    syncRequest('PATCH', { id, updated: { available: nextAvailable } });
+  };
+  const toggleSale = (id: number) => {
+    const target = dishes.find((d) => d.id === id);
+    const nextSale = !target?.sale;
+    setDishes((prev) =>
+      prev.map((dish) => (dish.id === id ? { ...dish, sale: nextSale } : dish))
+    );
+    syncRequest('PATCH', { id, updated: { sale: nextSale } });
+  };
+  const updateDish = (id: number, updated: Partial<DishItem>) => {
+    setDishes((prev) =>
+      prev.map((dish) => (dish.id === id ? { ...dish, ...updated } : dish))
+    );
+    syncRequest('PATCH', { id, updated });
+  };
+  const uploadImage = async (id: number, file: File): Promise<void> => {
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('productId', String(id));
+      const response = await fetch('/api/admin/image', {
+        method: 'POST',
+        body: formData,
+        credentials: 'same-origin',
+      });
+      if (!response.ok) {
+        const data = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new Error(data.error || `Upload failed (${response.status})`);
+      }
+      const { publicUrl, storagePath } = (await response.json()) as {
+        publicUrl: string;
+        storagePath: string;
+      };
+      setDishes((prev) =>
+        prev.map((dish) =>
+          dish.id === id
+            ? {
+                ...dish,
+                image: storagePath,
+                uploadedDataUrl: publicUrl,
+                storagePath,
+              }
+            : dish
+        )
+      );
+      syncRequest('PATCH', {
+        id,
+        updated: { image: storagePath, uploadedDataUrl: publicUrl, storagePath },
+      });
+    } catch (err) {
+      console.error('Failed to upload image:', err);
+    }
+  };
+  const deleteImage = async (id: number): Promise<void> => {
+    try {
+      const dish = dishes.find((d) => d.id === id);
+      if (!dish?.storagePath) {return;}
+      await fetch(`/api/admin/image?path=${encodeURIComponent(dish.storagePath)}`, {
+        method: 'DELETE',
+        credentials: 'same-origin',
+      });
+      setDishes((prev) =>
+        prev.map((d) =>
+          d.id === id
+            ? { ...d, uploadedDataUrl: undefined, image: 'maincourse', storagePath: null }
+            : d
+        )
+      );
+      syncRequest('PATCH', {
+        id,
+        updated: { image: 'maincourse', uploadedDataUrl: null, storagePath: null },
+      });
+    } catch (err) {
+      console.error('Failed to delete image:', err);
+    }
+  };
+  const addDish = (newDish: Omit<DishItem, 'id'> & { id?: number }): number => {
+    const id = newDish.id ?? generateSecureDishId(dishes.map((d) => d.id));
+    const dishWithId: DishItem = {
+      ...newDish,
+      id,
+    };
+    setDishes((prev) => [dishWithId, ...prev]);
+    syncRequest('POST', { dish: dishWithId });
+    return id;
+  };
+  const deleteDish = (id: number) => {
+    setDishes((prev) => prev.filter((d) => d.id !== id));
+    syncRequest('DELETE', undefined, `?id=${id}`);
+  };
+  const duplicateDish = (id: number): number => {
+    const target = dishes.find((d) => d.id === id);
+    if (!target) {return -1;}
+    const nextId = generateSecureDishId(dishes.map((d) => d.id));
+    let newImage = target.image;
+    if (target.image && (target.image.startsWith(`${target.id}.`) || target.image === String(target.id))) {
+      const ext = target.image.includes('.') ? target.image.split('.').pop() : 'jpg';
+      newImage = `${nextId}.${ext}`;
+    }
+    const cloned: DishItem = {
+      ...target,
+      id: nextId,
+      image: newImage,
+      title: `${target.title} (Copy)`,
+      title_ar: target.title_ar ? `${target.title_ar} (نسخة)` : undefined,
+    };
+    setDishes((prev) => [cloned, ...prev]);
+    syncRequest('POST', { dish: cloned });
+    return nextId;
+  };
+  const generateSecureId = () => generateSecureDishId(dishes.map((d) => d.id));
+  const resetMenu = () => {
+    setDishes(initialDishes as unknown as DishItem[]);
+    syncRequest('DELETE', undefined, '?reset=true');
+  };
+  const compileServerJson = () => compileDishesToJson(dishes);
+  return (
+    <MenuContext.Provider
+      value={{
+        dishes,
+        loading,
+        endpoints: API_ENDPOINTS,
+        toggleAvailability,
+        toggleSale,
+        updateDish,
+        addDish,
+        deleteDish,
+        duplicateDish,
+        generateSecureId,
+        resetMenu,
+        compileServerJson,
+        uploadImage,
+        deleteImage,
+      }}
+    >
+      {children}
+    </MenuContext.Provider>
+  );
+}
+export function useMenu() {
+  const context = useContext(MenuContext);
+  if (!context) {
+    throw new Error('useMenu must be used within a MenuProvider');
+  }
+  return context;
+}
 ````
 
 ## File: test-utils/render.tsx
