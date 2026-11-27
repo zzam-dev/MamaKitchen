@@ -1,13 +1,3 @@
-/**
- * Vercel Edge Function: Menu API (/api/menu)
- * Runtime: Edge
- *
- * - GET    /api/menu          → Public: fetch all dishes from Supabase (auto-seeds from dishes.json if empty)
- * - POST   /api/menu          → Admin: upsert one or more dishes
- * - PATCH  /api/menu          → Admin: update fields on a dish by id
- * - DELETE /api/menu?id=123   → Admin: delete a dish by id (or ?reset=true to re-seed defaults)
- */
-
 import { createClient } from '@supabase/supabase-js';
 import initialDishes from '../src/data/dishes.json';
 
@@ -30,6 +20,7 @@ interface DbDishRow {
   sizes: Array<{ label: string; price: number; discountedPrice?: number }>;
   perPiecePrice?: number | null;
   perPieceDiscountedPrice?: number | null;
+  storage_path?: string | null;
 }
 
 interface ClientDish {
@@ -45,6 +36,7 @@ interface ClientDish {
   available?: boolean;
   sizes: Array<{ label: string; price: number; discountedPrice?: number }>;
   perPiece?: { price: number; discountedPrice?: number };
+  storagePath?: string | null;
 }
 
 function toDbRow(dish: ClientDish): DbDishRow {
@@ -117,11 +109,9 @@ async function isAdminAuthorized(req: Request): Promise<boolean> {
   const cookies = parseCookies(req.headers.get('cookie') ?? '');
   const token = cookies[COOKIE_NAME];
   if (!token) {return false;}
-
   const secret =
     process.env.SESSION_SECRET ||
     (process.env.ADMIN_PASS ? `session_${process.env.ADMIN_PASS}` : 'mama_kitchen_default_session_secret_2026');
-
   const encoder = new TextEncoder();
   const key = await crypto.subtle.importKey(
     'raw',
@@ -134,7 +124,6 @@ async function isAdminAuthorized(req: Request): Promise<boolean> {
   const expected = Array.from(new Uint8Array(signature))
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('');
-
   return safeEqual(token, expected);
 }
 
@@ -148,25 +137,20 @@ function json(data: unknown, status = 200): Response {
 export default async function handler(req: Request): Promise<Response> {
   const supabaseUrl = process.env.SUPABASE_URL;
   const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
   if (!supabaseUrl || !supabaseKey) {
     return json({ error: 'Supabase environment variables are not configured.' }, 500);
   }
-
   const supabase = createClient(supabaseUrl, supabaseKey);
 
-  // ── GET /api/menu (Public) ────────────────────────────────────────────────
+  // ── GET /api/menu (public) ────────────────────────────────────────────────
   if (req.method === 'GET') {
     const { data, error } = await supabase
       .from('dishes')
       .select('*')
       .order('id', { ascending: true });
-
     if (error) {
       return json({ error: error.message }, 500);
     }
-
-    // Auto-seed from src/data/dishes.json on first run if table is empty
     if (!data || data.length === 0) {
       const seedRows = (initialDishes as unknown as ClientDish[]).map(toDbRow);
       const { data: seeded, error: seedError } = await supabase
@@ -174,77 +158,64 @@ export default async function handler(req: Request): Promise<Response> {
         .upsert(seedRows, { onConflict: 'id' })
         .select('*')
         .order('id', { ascending: true });
-
       if (seedError) {
         return json({ error: seedError.message }, 500);
       }
       return json({ dishes: (seeded as DbDishRow[]).map(toClientDish) });
     }
-
     return json({ dishes: (data as DbDishRow[]).map(toClientDish) });
   }
 
-  // ── Admin-only mutations below ────────────────────────────────────────────
+  // ── Everything below requires admin ───────────────────────────────────────
   if (!(await isAdminAuthorized(req))) {
     return json({ error: 'Unauthorized' }, 401);
   }
 
-  // ── POST /api/menu (Upsert dish or array of dishes) ───────────────────────
   if (req.method === 'POST') {
     const body = (await req.json()) as { dish?: ClientDish; dishes?: ClientDish[] };
     const items = body.dishes ?? (body.dish ? [body.dish] : []);
     if (items.length === 0) {
       return json({ error: 'Missing dish payload' }, 400);
     }
-
     const { error } = await supabase
       .from('dishes')
       .upsert(items.map(toDbRow), { onConflict: 'id' });
-
     if (error) {
       return json({ error: error.message }, 500);
     }
     return json({ success: true });
   }
 
-  // ── PATCH /api/menu (Partial update by id) ────────────────────────────────
   if (req.method === 'PATCH') {
     const body = (await req.json()) as { id?: number; updated?: Partial<ClientDish> };
     if (!body.id || !body.updated) {
       return json({ error: 'Missing id or updated fields' }, 400);
     }
-
     const { data: existing, error: fetchError } = await supabase
       .from('dishes')
       .select('*')
       .eq('id', body.id)
       .single();
-
     if (fetchError || !existing) {
       return json({ error: 'Dish not found' }, 404);
     }
-
     const merged: ClientDish = {
       ...toClientDish(existing as DbDishRow),
       ...body.updated,
       id: body.id,
     };
-
     const { error } = await supabase
       .from('dishes')
       .upsert(toDbRow(merged), { onConflict: 'id' });
-
     if (error) {
       return json({ error: error.message }, 500);
     }
     return json({ success: true });
   }
 
-  // ── DELETE /api/menu (Delete by id or ?reset=true) ────────────────────────
   if (req.method === 'DELETE') {
     const url = new URL(req.url);
     const reset = url.searchParams.get('reset') === 'true';
-
     if (reset) {
       await supabase.from('dishes').delete().neq('id', -1);
       const seedRows = (initialDishes as unknown as ClientDish[]).map(toDbRow);
@@ -252,13 +223,11 @@ export default async function handler(req: Request): Promise<Response> {
       if (error) {return json({ error: error.message }, 500);}
       return json({ success: true });
     }
-
     const idParam = url.searchParams.get('id');
     const id = idParam ? Number(idParam) : NaN;
     if (!Number.isFinite(id)) {
       return json({ error: 'Invalid dish id' }, 400);
     }
-
     const { error } = await supabase.from('dishes').delete().eq('id', id);
     if (error) {
       return json({ error: error.message }, 500);
